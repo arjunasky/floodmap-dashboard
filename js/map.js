@@ -111,6 +111,37 @@ function smoothPath(points) {
 }
 
 // ============================================================
+// MAP MATCHING — Snap polyline ke jalan OSM via OSRM
+// ============================================================
+async function snapToRoad(points) {
+    if (points.length < 2) return points;
+
+    // Batasi 90 titik per request (OSRM limit ~100)
+    const limited = points.slice(-90);
+    const coords = limited.map(p => `${p.longitude},${p.latitude}`).join(';');
+
+    const url = `https://router.project-osrm.org/match/v1/driving/${coords}` +
+                `?geometries=geojson&overview=full&gaps=ignore&tidy=true`;
+
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('OSRM error');
+        const data = await res.json();
+
+        if (data.matchings && data.matchings.length > 0) {
+            // Ambil koordinat hasil matching (sudah di-snap ke jalan)
+            const matchedCoords = data.matchings[0].geometry.coordinates;
+            return matchedCoords.map(c => ({ latitude: c[1], longitude: c[0] }));
+        }
+    } catch (e) {
+        console.warn('⚠️ OSRM gagal, fallback ke raw:', e.message);
+    }
+
+    // Fallback: pakai raw points
+    return limited;
+}
+
+// ============================================================
 // 4. RENDER POLYLINE GENANGAN
 // ============================================================
 

@@ -28,10 +28,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ---- Listener: flood points ----
     onFloodPoints((data) => {
-        const allData = Object.values(data)
+        const rawArray = Object.values(data || {});
+        console.log('📦 Raw:', rawArray.length);
+    
+        const allData = rawArray
             .map(p => ({
-                latitude:   parseFloat(p.latitude  || p.lat) || 0,
-                longitude:  parseFloat(p.longitude || p.lng) || 0,
+                latitude:   parseFloat(p.latitude),
+                longitude:  parseFloat(p.longitude),
                 depth:      parseFloat(p.depth) || 0,
                 status:     (p.status || 'aman').toLowerCase(),
                 location:   p.location || '-',
@@ -41,22 +44,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 depth_valid: p.depth_valid !== false,
                 source:     p.source || 'gps'
             }))
-            .filter(p => p.latitude && p.longitude)
+            .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
-
-        // 🔧 Data kendaraan = SEMUA titik (untuk marker)
-        currentVehicleData = allData;
-
-        // 🔧 Data genangan = HANYA dengan depth > 0 & segment_id
+    
+        // 🔧 Kendaraan = HANYA yang GPS real
+        currentVehicleData = allData.filter(p => p.source === 'gps');
+        console.log(`✅ Kendaraan (GPS real): ${currentVehicleData.length}`);
+    
+        // 🔧 Genangan = HANYA GPS real + depth > 0
         currentFloodData = allData.filter(p =>
+            p.source === 'gps' &&           // ← HANYA GPS real
             p.depth > 0 &&
             p.segment_id &&
             p.depth_valid !== false
         );
-
-        console.log(`📥 Total: ${allData.length} | Genangan: ${currentFloodData.length}`);
-
-        // Update UI
+        console.log(`💧 Genangan: ${currentFloodData.length}`);
+    
         updateUI(currentVehicleData);
         updateHistoryTable(currentVehicleData);
         updateNotif(currentVehicleData);
