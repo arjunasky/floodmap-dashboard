@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
     onFloodPoints(async (data) => {
         const rawArray = Object.values(data || {});
         console.log('📦 Raw data:', rawArray.length);
-
+    
         const allData = rawArray
             .map(p => ({
                 latitude:   parseFloat(p.latitude),
@@ -54,47 +54,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 roll:       parseFloat(p.roll) || 0,
                 segment_id: p.segment_id || '',
                 depth_valid: p.depth_valid !== false,
-                source:     p.source || 'gps'
+                source:     p.source || 'gps',
+                satellites: parseInt(p.satellites) || 0      // 🔧 BARU
             }))
             .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
-
-        // 🔧 currentAllData — SEMUA data (sensor readout, riwayat)
+    
+        // Sensor readout — SEMUA data
         currentAllData = allData;
-
-        // 🔧 currentVehicleData — HANYA GPS real (marker di peta)
-        currentVehicleData = allData.filter(p => p.source === 'gps');
-
-        // 🔧 Genangan: hanya GPS real + depth > 0 + segment_id
+    
+        // 🔧 Marker peta — HANYA GPS real + satelit >= 4
+        currentVehicleData = allData.filter(p => 
+            p.source === 'gps' && 
+            p.satellites >= 4
+        );
+    
+        console.log(`✅ GPS real (sat≥4): ${currentVehicleData.length} | Total: ${allData.length}`);
+    
+        // Genangan: hanya GPS real + depth > 0 + segment_id + satelit >= 4
         const withFlood = allData.filter(p =>
             p.source === 'gps' &&
+            p.satellites >= 4 &&
             p.depth > 0 &&
             p.segment_id &&
             p.depth_valid !== false
         );
-
-        // Road matching untuk filter mana yang di jalan
+    
         if (withFlood.length > 0 && typeof matchToRoad === 'function') {
             const matched = await matchToRoad(withFlood);
             currentFloodData   = matched.filter(p => p.matched);
             currentOffRoadData = matched.filter(p => !p.matched);
         } else {
-            currentFloodData = withFlood;
+            currentFloodData = [];
             currentOffRoadData = [];
         }
-
-        console.log(`📊 Sensor: ${allData.length} | GPS: ${currentVehicleData.length} | Genangan di jalan: ${currentFloodData.length} | Off-road: ${currentOffRoadData.length}`);
-
-        // ============================================================
-        // UPDATE UI
-        // ============================================================
-        updateUI(currentAllData);              // Sensor readout — semua data
-        updateHistoryTable(currentAllData);    // Riwayat — semua data
+    
+        // Update UI
+        updateUI(currentAllData);
+        updateHistoryTable(currentAllData);
         updateNotif(currentAllData);
-        updateCharts(currentFloodData);        // Chart — genangan di jalan
+        updateCharts(currentFloodData);
         updateOffRoadStats(currentOffRoadData);
-
-        // Peta — hanya GPS real
         redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData)
             .catch(err => console.error('Map error:', err));
 

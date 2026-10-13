@@ -304,22 +304,34 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         floodLayerGroup.addLayer(dot);
     });
 
-    // ---- Vehicle marker ----
-    if (allData && allData.length > 0) {
-        const last = allData[allData.length - 1];
+   // ============================================================
+// VEHICLE MARKER — HANYA tampil kalau ada GPS real
+// ============================================================
+if (allData && allData.length > 0) {
+    // Ada GPS real → tampilkan marker
+    const last = allData[allData.length - 1];
 
-        if (vehicleMarker) {
-            if (!map.hasLayer(vehicleMarker)) vehicleMarker.addTo(map);
-            vehicleMarker.setLatLng([last.latitude, last.longitude]);
-            vehicleMarker.setZIndexOffset(1000);
-        }
-
-        if (isFirstLoad) {
-            isFirstLoad = false;
-            map.setView([last.latitude, last.longitude], 17);
-            console.log(`📍 Auto-focus: ${last.latitude.toFixed(6)}, ${last.longitude.toFixed(6)}`);
-        }
+    if (vehicleMarker) {
+        if (!map.hasLayer(vehicleMarker)) vehicleMarker.addTo(map);
+        vehicleMarker.setLatLng([last.latitude, last.longitude]);
+        vehicleMarker.setZIndexOffset(1000);
     }
+
+    if (isFirstLoad) {
+        isFirstLoad = false;
+        map.setView([last.latitude, last.longitude], 17);
+        console.log(`📍 Auto-focus: ${last.latitude.toFixed(6)}, ${last.longitude.toFixed(6)}`);
+    }
+} else {
+    // 🔧 TIDAK ada GPS real → HAPUS marker dari peta
+    if (vehicleMarker && map.hasLayer(vehicleMarker)) {
+        map.removeLayer(vehicleMarker);
+        console.log('📍 GPS belum akurat — marker disembunyikan');
+    }
+    
+    // Reset flag biar auto-focus ke kendaraan saat GPS real muncul
+    isFirstLoad = true;
+}
 
     updateMapStats(
         floodData.length,
