@@ -1,5 +1,6 @@
 // ============================================================
 // APP.JS — Main Application Logic
+// FloodMap Makassar — Sensor Fusion Dashboard
 // ============================================================
 
 const APP = {
@@ -8,10 +9,14 @@ const APP = {
     thresholdImu: 0.30
 };
 
-// 🔧 DUA array terpisah:
-let currentVehicleData = [];   // SEMUA titik GPS (untuk marker kendaraan)
-let currentFloodData = [];     // HANYA titik genangan (untuk polyline)
-let currentEvents = {};
+// ============================================================
+// VARIABEL GLOBAL
+// ============================================================
+let currentAllData = [];         // 🔧 SEMUA data (sensor readout)
+let currentVehicleData = [];     // Hanya GPS real (marker peta)
+let currentFloodData = [];       // Genangan di jalan
+let currentOffRoadData = [];     // Genangan di luar jalan
+let currentEvents = {};          // Road events
 
 // ============================================================
 // INIT
@@ -20,17 +25,21 @@ let currentEvents = {};
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 FloodMap Makassar dimulai...');
 
+    // Init map dulu
     initMap();
+
     setupNavigation();
     setupSettings();
     setupMapFilters();
     setupAdminPanel();
 
-    // ---- Listener: flood points ----
+    // ============================================================
+    // LISTENER: FLOOD POINTS
+    // ============================================================
     onFloodPoints(async (data) => {
         const rawArray = Object.values(data || {});
         console.log('📦 Raw data:', rawArray.length);
-    
+
         const allData = rawArray
             .map(p => ({
                 latitude:   parseFloat(p.latitude),
@@ -49,69 +58,82 @@ document.addEventListener('DOMContentLoaded', () => {
             }))
             .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
-    
-        // Data kendaraan (semua titik GPS)
+
+        // 🔧 currentAllData — SEMUA data (sensor readout, riwayat)
+        currentAllData = allData;
+
+        // 🔧 currentVehicleData — HANYA GPS real (marker di peta)
         currentVehicleData = allData.filter(p => p.source === 'gps');
-    
-        // ============================================================
-        // 🔧 PISAHKAN: titik dengan genangan vs tidak
-        // ============================================================
-        const withFlood = allData.filter(p => 
-            p.source === 'gps' && 
-            p.depth > 0 && 
-            p.segment_id
+
+        // 🔧 Genangan: hanya GPS real + depth > 0 + segment_id
+        const withFlood = allData.filter(p =>
+            p.source === 'gps' &&
+            p.depth > 0 &&
+            p.segment_id &&
+            p.depth_valid !== false
         );
-    
-        // Road matching untuk cek mana yang di jalan
-        if (withFlood.length > 0) {
+
+        // Road matching untuk filter mana yang di jalan
+        if (withFlood.length > 0 && typeof matchToRoad === 'function') {
             const matched = await matchToRoad(withFlood);
-            
-            // 🔧 DUA KATEGORI
-            currentFloodData = matched.filter(p => p.matched);      // ✅ DI JALAN
-            currentOffRoadData = matched.filter(p => !p.matched);   // ⚠️ DI LUAR JALAN
-    
-            console.log(`💧 Genangan di jalan: ${currentFloodData.length}`);
-            console.log(`⚠️  Genangan di luar jalan: ${currentOffRoadData.length}`);
-            console.log(`📊 Total sensor baca genangan: ${withFlood.length}`);
+            currentFloodData   = matched.filter(p => p.matched);
+            currentOffRoadData = matched.filter(p => !p.matched);
         } else {
-            currentFloodData = [];
+            currentFloodData = withFlood;
             currentOffRoadData = [];
         }
-    
-        // Update UI
-        updateUI(currentVehicleData);
-        updateHistoryTable(currentVehicleData);
-        updateNotif(currentVehicleData);
-        updateCharts(currentFloodData);
+
+        console.log(`📊 Sensor: ${allData.length} | GPS: ${currentVehicleData.length} | Genangan di jalan: ${currentFloodData.length} | Off-road: ${currentOffRoadData.length}`);
+
+        // ============================================================
+        // UPDATE UI
+        // ============================================================
+        updateUI(currentAllData);              // Sensor readout — semua data
+        updateHistoryTable(currentAllData);    // Riwayat — semua data
+        updateNotif(currentAllData);
+        updateCharts(currentFloodData);        // Chart — genangan di jalan
         updateOffRoadStats(currentOffRoadData);
-        redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData);
-    
+
+        // Peta — hanya GPS real
+        redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData)
+            .catch(err => console.error('Map error:', err));
+
         // Geocoding async
-        if (currentVehicleData.length > 0) {
+        if (currentVehicleData.length > 0 && typeof prefetchStreetNames === 'function') {
             prefetchStreetNames(currentVehicleData).then(() => {
                 currentVehicleData.forEach(p => {
                     const name = geocodeCache[gridKey(p.latitude, p.longitude)];
                     if (name) p.location = name;
                 });
-                updateUI(currentVehicleData);
-                updateHistoryTable(currentVehicleData);
+                currentAllData.forEach(p => {
+                    const name = geocodeCache[gridKey(p.latitude, p.longitude)];
+                    if (name) p.location = name;
+                });
+                updateUI(currentAllData);
+                updateHistoryTable(currentAllData);
             });
         }
     });
-    
-    // Deklarasi variabel baru di atas
-    let currentOffRoadData = [];
 
-    // ---- Listener: road events ----
+    // ============================================================
+    // LISTENER: ROAD EVENTS
+    // ============================================================
     onRoadEvents((data) => {
         currentEvents = data || {};
         window._roadEventsCache = currentEvents;
-        renderRoadEvents(currentEvents);
-        updateEventChart(currentEvents);
+
+        if (typeof renderRoadEvents === 'function') {
+            renderRoadEvents(currentEvents);
+        }
+        if (typeof updateEventChart === 'function') {
+            updateEventChart(currentEvents);
+        }
         updateEventsTable(currentEvents);
     });
 
-    // ---- Listener: system status ----
+    // ============================================================
+    // LISTENER: SYSTEM STATUS
+    // ============================================================
     onSystemStatus((status) => {
         const raw = status.esp32_online;
         const isEspOnline = raw === true || raw === 'true' || raw === 1 || raw === '1';
@@ -135,28 +157,34 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Init road events layer
+    // ============================================================
+    // INIT ROAD EVENTS LAYER
+    // ============================================================
     setTimeout(() => {
-        initRoadEventLayer(map);
-        listenRoadEvents();
+        if (typeof initRoadEventLayer === 'function') {
+            initRoadEventLayer(map);
+        }
+        if (typeof listenRoadEvents === 'function') {
+            listenRoadEvents();
+        }
     }, 500);
 
     setupExportButtons();
 
-    // 🔧 TOMBOL FOCUS KENDARAAN
+    // ============================================================
+    // TOMBOL FOCUS KENDARAAN
+    // ============================================================
     const btnFocus = document.getElementById('btnFocusVehicle');
     if (btnFocus) {
         btnFocus.addEventListener('click', () => {
-            console.log('🎯 Tombol focus diklik. Data:', currentVehicleData.length);
+            console.log('🎯 Tombol focus. Data kendaraan:', currentVehicleData.length);
 
             if (!currentVehicleData || currentVehicleData.length === 0) {
-                alert('Belum ada data kendaraan dari GPS. Pastikan ESP32 sudah kirim data.');
+                alert('Belum ada data kendaraan dari GPS. Pastikan GPS sudah fix.');
                 return;
             }
 
             const last = currentVehicleData[currentVehicleData.length - 1];
-            console.log('📍 Focus ke:', last.latitude, last.longitude);
-
             map.setView([last.latitude, last.longitude], 18);
 
             if (typeof vehicleMarker !== 'undefined' && vehicleMarker) {
@@ -211,6 +239,7 @@ function setupNavigation() {
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             this.classList.add('active');
             document.querySelectorAll('.page-content').forEach(p => p.classList.remove('active'));
+
             const target = document.getElementById('page-' + page);
             if (target) target.classList.add('active');
 
@@ -219,16 +248,22 @@ function setupNavigation() {
 
             closeSidebar();
 
-            if (page === 'map' && map) setTimeout(() => map.invalidateSize(), 200);
+            if (page === 'map' && map) {
+                setTimeout(() => map.invalidateSize(), 200);
+            }
             if (page === 'stats') {
                 updateCharts(currentFloodData);
-                updateEventChart(currentEvents);
+                if (typeof updateEventChart === 'function') {
+                    updateEventChart(currentEvents);
+                }
             }
         });
     });
 
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && sidebar && sidebar.classList.contains('open')) closeSidebar();
+        if (e.key === 'Escape' && sidebar && sidebar.classList.contains('open')) {
+            closeSidebar();
+        }
     });
 }
 
@@ -239,20 +274,29 @@ function setupNavigation() {
 function setupSettings() {
     const btn = document.getElementById('btnSaveSettings');
     if (!btn) return;
+
     btn.addEventListener('click', () => {
         const s = parseInt(document.getElementById('thresholdSiaga').value);
         const b = parseInt(document.getElementById('thresholdBahaya').value);
         const imu = parseFloat(document.getElementById('thresholdImu').value);
-        if (s >= b) { alert('⚠️ Nilai Siaga harus lebih kecil dari Bahaya!'); return; }
+
+        if (s >= b) {
+            alert('⚠️ Nilai Siaga harus lebih kecil dari Bahaya!');
+            return;
+        }
+
         APP.thresholdSiaga = s;
         APP.thresholdBahaya = b;
         APP.thresholdImu = imu;
+
         alert('✅ Pengaturan disimpan!');
+        console.log('⚙️ Settings:', APP);
     });
 }
 
 // ============================================================
-// ADMIN PANEL — HIDDEN
+// 🔒 ADMIN PANEL — HIDDEN
+// Akses: Klik 5x pada header "Pengaturan Sistem" ATAU ketik "admin"
 // ============================================================
 
 let adminUnlocked = false;
@@ -262,23 +306,38 @@ let adminClickTimer = null;
 function setupAdminPanel() {
     const header = document.getElementById('settingsHeader');
     const panel = document.getElementById('adminPanel');
-    if (!header || !panel) return;
 
+    if (!header || !panel) {
+        console.warn('⚠️ Admin panel elements tidak ditemukan');
+        return;
+    }
+
+    // Metode 1: Klik 5x pada header
     header.addEventListener('click', () => {
         adminClickCount++;
         clearTimeout(adminClickTimer);
         adminClickTimer = setTimeout(() => { adminClickCount = 0; }, 800);
-        if (adminClickCount >= 5) { adminClickCount = 0; unlockAdmin(); }
+
+        if (adminClickCount >= 5) {
+            adminClickCount = 0;
+            unlockAdmin();
+        }
     });
 
+    // Metode 2: Ketik "admin"
     let typedBuffer = '';
     document.addEventListener('keydown', (e) => {
         const currentPage = document.querySelector('.page-content.active');
         if (!currentPage || currentPage.id !== 'page-settings') return;
+
         if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
             typedBuffer += e.key.toLowerCase();
             if (typedBuffer.length > 10) typedBuffer = typedBuffer.slice(-10);
-            if (typedBuffer.endsWith('admin')) { typedBuffer = ''; unlockAdmin(); }
+
+            if (typedBuffer.endsWith('admin')) {
+                typedBuffer = '';
+                unlockAdmin();
+            }
         }
     });
 
@@ -286,11 +345,13 @@ function setupAdminPanel() {
         if (adminUnlocked) return;
         adminUnlocked = true;
         panel.style.display = 'block';
+
         if (!document.querySelector('.admin-active-indicator')) {
             const dot = document.createElement('div');
             dot.className = 'admin-active-indicator';
             document.body.appendChild(dot);
         }
+        console.log('🔓 Admin panel unlocked');
     }
 
     function lockAdmin() {
@@ -298,8 +359,10 @@ function setupAdminPanel() {
         panel.style.display = 'none';
         const dot = document.querySelector('.admin-active-indicator');
         if (dot) dot.remove();
+        console.log('🔒 Admin panel locked');
     }
 
+    // Admin buttons
     const btnResetView = document.getElementById('btnAdminResetView');
     if (btnResetView) btnResetView.addEventListener('click', () => resetViewOnly());
 
@@ -307,8 +370,11 @@ function setupAdminPanel() {
     if (btnClearFlood) {
         btnClearFlood.addEventListener('click', () => {
             if (!confirm('⚠️ Hapus SEMUA flood_points?')) return;
-            if (!confirm('Yakin?')) return;
-            clearFloodPoints().then(() => { alert('✅ Dihapus'); resetViewOnly(); });
+            if (!confirm('Yakin? Tidak bisa dikembalikan.')) return;
+            clearFloodPoints().then(() => {
+                alert('✅ Dihapus');
+                resetViewOnly();
+            });
         });
     }
 
@@ -317,7 +383,12 @@ function setupAdminPanel() {
         btnClearEvents.addEventListener('click', () => {
             if (!confirm('⚠️ Hapus SEMUA road_events?')) return;
             if (!confirm('Yakin?')) return;
-            clearRoadEvents().then(() => { alert('✅ Dihapus'); });
+            clearRoadEvents().then(() => {
+                alert('✅ Dihapus');
+                if (typeof roadEventLayerGroup !== 'undefined' && roadEventLayerGroup) {
+                    roadEventLayerGroup.clearLayers();
+                }
+            });
         });
     }
 
@@ -327,8 +398,15 @@ function setupAdminPanel() {
             if (!confirm('⚠️⚠️ FULL RESET?')) return;
             if (!confirm('Yakin?')) return;
             if (!confirm('Lanjutkan?')) return;
+
             Promise.all([clearFloodPoints(), clearRoadEvents()])
-                .then(() => { alert('✅ Full reset'); resetViewOnly(); });
+                .then(() => {
+                    alert('✅ Full reset');
+                    resetViewOnly();
+                    if (typeof roadEventLayerGroup !== 'undefined' && roadEventLayerGroup) {
+                        roadEventLayerGroup.clearLayers();
+                    }
+                });
         });
     }
 
@@ -337,25 +415,43 @@ function setupAdminPanel() {
 }
 
 // ============================================================
-// RESET TAMPILAN
+// RESET TAMPILAN (hanya visual)
 // ============================================================
 
 function resetViewOnly() {
-    console.log('🔄 Reset tampilan');
+    console.log('🔄 Reset tampilan saja');
+
     if (typeof map !== 'undefined' && map) {
         map.setView(MAP_CONFIG.center, MAP_CONFIG.zoom);
     }
-    if (typeof floodLayerGroup !== 'undefined' && floodLayerGroup) floodLayerGroup.clearLayers();
-    if (typeof roadEventLayerGroup !== 'undefined' && roadEventLayerGroup) roadEventLayerGroup.clearLayers();
+    if (typeof floodLayerGroup !== 'undefined' && floodLayerGroup) {
+        floodLayerGroup.clearLayers();
+    }
+    if (typeof roadEventLayerGroup !== 'undefined' && roadEventLayerGroup) {
+        roadEventLayerGroup.clearLayers();
+    }
     if (typeof vehicleMarker !== 'undefined' && vehicleMarker && map) {
         vehicleMarker.setLatLng(MAP_CONFIG.center);
     }
-    if (typeof segmentPolylines !== 'undefined') segmentPolylines = {};
-    if (typeof roadEventMarkers !== 'undefined') roadEventMarkers = [];
-    if (typeof updateMapStats === 'function') updateMapStats(0, 0);
-    if (typeof isFirstLoad !== 'undefined') isFirstLoad = true;
+    if (typeof segmentPolylines !== 'undefined') {
+        segmentPolylines = {};
+    }
+    if (typeof roadEventMarkers !== 'undefined') {
+        roadEventMarkers = [];
+    }
+    if (typeof updateMapStats === 'function') {
+        updateMapStats(0, 0, 0);
+    }
+    if (typeof isFirstLoad !== 'undefined') {
+        isFirstLoad = true;
+    }
+
     const notif = document.getElementById('notifBox');
-    if (notif) notif.innerHTML = '<div class="notif-item info">Tampilan direset</div>';
+    if (notif) {
+        notif.innerHTML = '<div class="notif-item info">Tampilan direset</div>';
+    }
+
+    console.log('✅ Tampilan reset');
 }
 
 // ============================================================
@@ -374,18 +470,22 @@ function updateEventsTable(events) {
     }
 
     const sorted = arr.sort((a, b) => b.timestamp - a.timestamp);
+
     tb.innerHTML = sorted.map((e, i) => {
         const isPothole = e.event_type === 'pothole';
         const emoji = isPothole ? '🕳️' : '🚧';
         const label = isPothole ? 'Lubang' : 'Polisi Tidur';
         const cls = isPothole ? 'bahaya' : 'siaga';
+
         return `<tr>
             <td>${i+1}</td>
             <td>${formatTime(e.timestamp)}</td>
             <td><span class="status-badge ${cls}">${emoji} ${label}</span></td>
-            <td>${(e.magnitude_g || 0).toFixed(2)} g</td>
-            <td>${(e.z_axis_g || 0).toFixed(2)} g</td>
-            <td style="font-size:11px;">${(e.latitude||0).toFixed(5)}, ${(e.longitude||0).toFixed(5)}</td>
+            <td>${(parseFloat(e.magnitude_g) || 0).toFixed(2)} g</td>
+            <td>${(parseFloat(e.z_axis_g) || 0).toFixed(2)} g</td>
+            <td style="font-size:11px;">
+                ${(parseFloat(e.latitude)||0).toFixed(5)}, ${(parseFloat(e.longitude)||0).toFixed(5)}
+            </td>
         </tr>`;
     }).join('');
 
@@ -393,7 +493,7 @@ function updateEventsTable(events) {
 }
 
 // ============================================================
-// EXPORT
+// EXPORT BUTTONS
 // ============================================================
 
 function setupExportButtons() {
@@ -401,8 +501,11 @@ function setupExportButtons() {
     if (csv) {
         csv.addEventListener('click', () => {
             const arr = Object.values(currentEvents);
-            if (arr.length === 0) { alert('Tidak ada event'); return; }
-            const headers = ['timestamp', 'event_type', 'latitude', 'longitude', 'magnitude_g', 'z_axis_g'];
+            if (arr.length === 0) {
+                alert('Tidak ada event');
+                return;
+            }
+            const headers = ['timestamp', 'event_type', 'latitude', 'longitude', 'magnitude_g', 'z_axis_g', 'delay_ms'];
             let out = headers.join(',') + '\n';
             arr.forEach(e => {
                 out += headers.map(h => `"${e[h] !== undefined ? e[h] : ''}"`).join(',') + '\n';
@@ -443,5 +546,9 @@ function downloadFile(content, filename, type) {
 window.APP = APP;
 window.initMap = initMap;
 window.resetViewOnly = resetViewOnly;
+window.currentAllData = currentAllData;
+window.currentVehicleData = currentVehicleData;
+window.currentFloodData = currentFloodData;
+window.currentOffRoadData = currentOffRoadData;
 
 console.log('✅ app.js loaded');
