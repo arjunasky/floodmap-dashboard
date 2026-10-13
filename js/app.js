@@ -27,9 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminPanel();
 
     // ---- Listener: flood points ----
-    onFloodPoints((data) => {
+    onFloodPoints(async (data) => {
         const rawArray = Object.values(data || {});
-        console.log('📦 Raw:', rawArray.length);
+        console.log('📦 Raw data:', rawArray.length);
     
         const allData = rawArray
             .map(p => ({
@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 longitude:  parseFloat(p.longitude),
                 depth:      parseFloat(p.depth) || 0,
                 status:     (p.status || 'aman').toLowerCase(),
-                location:   p.location || '-',
+                location:   p.location || '-',           // ← placeholder
                 timestamp:  p.timestamp || Date.now(),
                 imuZ:       parseFloat(p.imuZ) || 0,
                 segment_id: p.segment_id || '',
@@ -47,24 +47,37 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
     
-        // 🔧 Kendaraan = HANYA yang GPS real
         currentVehicleData = allData.filter(p => p.source === 'gps');
-        console.log(`✅ Kendaraan (GPS real): ${currentVehicleData.length}`);
-    
-        // 🔧 Genangan = HANYA GPS real + depth > 0
         currentFloodData = allData.filter(p =>
-            p.source === 'gps' &&           // ← HANYA GPS real
-            p.depth > 0 &&
-            p.segment_id &&
-            p.depth_valid !== false
+            p.source === 'gps' && p.depth > 0 && p.segment_id && p.depth_valid !== false
         );
-        console.log(`💧 Genangan: ${currentFloodData.length}`);
     
+        // Update UI dulu dengan data mentah
         updateUI(currentVehicleData);
         updateHistoryTable(currentVehicleData);
         updateNotif(currentVehicleData);
         updateCharts(currentFloodData);
         redrawMapFromData(currentVehicleData, currentFloodData);
+    
+        // 🔧 Geocoding async — update nama jalan setelah selesai
+        if (currentVehicleData.length > 0) {
+            prefetchStreetNames(currentVehicleData).then(() => {
+                // Update nama jalan di setiap data
+                currentVehicleData.forEach(p => {
+                    const name = geocodeCache[gridKey(p.latitude, p.longitude)];
+                    if (name) p.location = name;
+                });
+                currentFloodData.forEach(p => {
+                    const name = geocodeCache[gridKey(p.latitude, p.longitude)];
+                    if (name) p.location = name;
+                });
+    
+                // Refresh UI dengan nama jalan baru
+                updateUI(currentVehicleData);
+                updateHistoryTable(currentVehicleData);
+                redrawMapFromData(currentVehicleData, currentFloodData);
+            });
+        }
     });
 
     // ---- Listener: road events ----

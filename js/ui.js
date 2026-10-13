@@ -1,5 +1,10 @@
 // ============================================================
 // UI.JS — Update UI Elements
+// FloodMap Makassar — Sensor Fusion Dashboard
+// ============================================================
+
+// ============================================================
+// UTIL FORMAT
 // ============================================================
 
 function formatTime(ts) {
@@ -16,6 +21,30 @@ function getStatusLabel(status) {
     if (s === 'siaga')  return { label: 'Siaga',  cls: 'siaga' };
     if (s === 'suppressed') return { label: 'Diabaikan', cls: 'suppressed' };
     return { label: 'Aman', cls: 'aman' };
+}
+
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
+// ============================================================
+// GET LOCATION NAME — dengan fallback
+// ============================================================
+function getLocationName(p) {
+    // 1. Cek cache geocoder (dari geocoder.js)
+    if (typeof geocodeCache !== 'undefined' && typeof gridKey === 'function') {
+        const key = gridKey(p.latitude, p.longitude);
+        if (geocodeCache[key]) return geocodeCache[key];
+    }
+
+    // 2. Kalau data punya location valid (bukan "-" / kosong / "Auto")
+    if (p.location && p.location !== '-' && p.location !== '' && p.location !== 'Auto') {
+        return p.location;
+    }
+
+    // 3. Fallback: tampilkan koordinat
+    return `Koordinat ${(p.latitude||0).toFixed(4)}, ${(p.longitude||0).toFixed(4)}`;
 }
 
 // ============================================================
@@ -43,22 +72,26 @@ function updateUI(dataArray) {
     setText('siagaCount', siaga);
     setText('bahayaCount', bahaya);
 
-    // Table 10 terbaru
+    // ---- Table 10 terbaru ----
     const tb = document.getElementById('tableBody');
     if (tb) {
-        const latest = [...dataArray].sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
+        const latest = [...dataArray]
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 10);
+
         tb.innerHTML = latest.map(d => {
             const st = getStatusLabel(d.status);
+            const loc = getLocationName(d);
             return `<tr>
                 <td>${formatTime(d.timestamp)}</td>
-                <td>${d.location || '-'}</td>
+                <td>${loc}</td>
                 <td><strong>${d.depth}</strong> cm</td>
                 <td><span class="status-badge ${st.cls}">${st.label}</span></td>
             </tr>`;
         }).join('');
     }
 
-    // Sensor readout
+    // ---- Sensor readout (data terbaru) ----
     const last = [...dataArray].sort((a, b) => b.timestamp - a.timestamp)[0];
     if (last) {
         const depthEl = document.getElementById('currentDepth');
@@ -67,16 +100,12 @@ function updateUI(dataArray) {
             depthEl.style.color = last.status === 'bahaya' ? '#ef4444' :
                                   last.status === 'siaga'  ? '#f59e0b' : '#22c55e';
         }
+
         setText('currentImu', (last.imuZ || 0) + ' g');
         setText('currentCoord',
             (last.latitude || 0).toFixed(4) + '°, ' + (last.longitude || 0).toFixed(4) + '°');
         setText('currentStep', total);
     }
-}
-
-function setText(id, val) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = val;
 }
 
 // ============================================================
@@ -94,12 +123,15 @@ function updateHistoryTable(dataArray) {
     }
 
     const sorted = [...dataArray].sort((a, b) => b.timestamp - a.timestamp);
+
     tbody.innerHTML = sorted.map((d, i) => {
         const st = getStatusLabel(d.status);
+        const loc = getLocationName(d);
+
         return `<tr>
             <td>${i+1}</td>
             <td>${formatTime(d.timestamp)}</td>
-            <td>${d.location || '-'}</td>
+            <td>${loc}</td>
             <td>${d.depth}</td>
             <td><span class="status-badge ${st.cls}">${st.label}</span></td>
             <td style="font-size:11px; color:#64748b;">
@@ -125,21 +157,46 @@ function updateNotif(dataArray) {
     }
 
     const sorted = [...dataArray].sort((a, b) => b.timestamp - a.timestamp);
+
     const danger = sorted.find(d => d.status === 'bahaya');
     const warning = sorted.find(d => d.status === 'siaga');
     const aman = sorted.find(d => d.status === 'aman');
 
     let html = '';
-    if (danger) html += `<div class="notif-item danger"><i class="ti ti-alert-triangle"></i> Bahaya — ${danger.location} (${danger.depth} cm)</div>`;
-    if (warning) html += `<div class="notif-item warning"><i class="ti ti-alert-circle"></i> Siaga — ${warning.location} (${warning.depth} cm)</div>`;
-    if (!html && aman) html = `<div class="notif-item info"><i class="ti ti-info-circle"></i> Aman — ${aman.location} (${aman.depth} cm)</div>`;
-    if (!html) html = '<div class="notif-item info">Sistem normal</div>';
+
+    if (danger) {
+        const loc = getLocationName(danger);
+        html += `<div class="notif-item danger">
+            <i class="ti ti-alert-triangle"></i>
+            Bahaya — ${loc} (${danger.depth} cm)
+        </div>`;
+    }
+
+    if (warning) {
+        const loc = getLocationName(warning);
+        html += `<div class="notif-item warning">
+            <i class="ti ti-alert-circle"></i>
+            Siaga — ${loc} (${warning.depth} cm)
+        </div>`;
+    }
+
+    if (!html && aman) {
+        const loc = getLocationName(aman);
+        html = `<div class="notif-item info">
+            <i class="ti ti-info-circle"></i>
+            Aman — ${loc} (${aman.depth} cm)
+        </div>`;
+    }
+
+    if (!html) {
+        html = '<div class="notif-item info">Sistem normal</div>';
+    }
 
     box.innerHTML = html;
 }
 
 // ============================================================
-// SENSOR STATUS
+// SENSOR STATUS (Sidebar)
 // ============================================================
 
 function updateSensorStatus(status) {
@@ -184,7 +241,16 @@ function updateClock() {
             String(now.getSeconds()).padStart(2,'0');
     }
 }
+
 setInterval(updateClock, 1000);
 updateClock();
+
+// ============================================================
+// EXPORT GLOBAL (untuk dipakai modul lain)
+// ============================================================
+
+window.getLocationName = getLocationName;
+window.formatTime = formatTime;
+window.getStatusLabel = getStatusLabel;
 
 console.log('✅ ui.js loaded');
