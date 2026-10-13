@@ -478,76 +478,181 @@ body.sidebar-open {
 }
 
 /* ============================================================
-   MAP LEGEND
+   MAP LEGEND — dengan tombol collapse
    ============================================================ */
-.map-legend {
+   .map-legend {
     position: absolute;
     bottom: 16px;
     left: 16px;
-    background: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.97);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    padding: 12px 16px;
+    padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid #e2e8f0;
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
     font-size: 12px;
-    min-width: 140px;
+    min-width: 150px;
+    max-width: 200px;
     z-index: 500;
-    max-width: 180px;
+    transition: all 0.3s ease;
+}
+
+/* Header legend */
+.legend-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
 }
 
 .legend-title {
-    font-weight: 600;
-    font-size: 11px;
-    color: var(--text-secondary);
-    margin-bottom: 6px;
-}
-
-.legend-row {
+    font-weight: 700;
+    font-size: 12px;
+    color: #0f172a;
+    margin: 0;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 2px 0;
-    color: var(--text-secondary);
-    font-size: 11px;
+    gap: 4px;
 }
 
-.legend-line {
+/* Tombol collapse */
+.legend-toggle-btn {
+    background: #f1f5f9;
+    border: none;
     width: 24px;
-    height: 5px;
-    border-radius: 4px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #475569;
+    font-size: 14px;
+    transition: all 0.2s;
+    padding: 0;
     flex-shrink: 0;
 }
 
-.legend-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    border: 2px solid white;
-    box-shadow: 0 0 0 1px #cbd5e1;
-    flex-shrink: 0;
+.legend-toggle-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
 }
 
+.legend-toggle-btn i {
+    transition: transform 0.3s ease;
+}
+
+/* Konten legend (yang bisa di-collapse) */
+.legend-content {
+    max-height: 400px;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease;
+    opacity: 1;
+    margin-top: 8px;
+}
+
+/* State collapsed */
+.map-legend.collapsed .legend-content {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+}
+
+.map-legend.collapsed .legend-toggle-btn i {
+    transform: rotate(180deg);
+}
+
+.map-legend.collapsed {
+    min-width: auto;
+    padding: 8px 10px;
+}
+
+/* Section legend */
 .legend-section {
     margin-top: 8px;
     padding-top: 6px;
     border-top: 1px dashed #e2e8f0;
 }
 
-.legend-section:first-of-type {
-    margin-top: 4px;
+.legend-section:first-child {
+    margin-top: 0;
     padding-top: 0;
-    border: none;
+    border-top: none;
 }
 
 .legend-subtitle {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     color: #94a3b8;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 4px;
+}
+
+.legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+    color: #475569;
+    font-size: 11px;
+}
+
+.legend-line {
+    width: 20px;
+    height: 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.legend-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 0 0 1px #cbd5e1;
+    flex-shrink: 0;
+}
+
+/* ============================================================
+   RESPONSIVE — Legend lebih kecil di mobile
+   ============================================================ */
+@media (max-width: 768px) {
+    .map-legend {
+        bottom: 10px;
+        left: 10px;
+        padding: 8px 10px;
+        font-size: 10px;
+        min-width: 130px;
+        max-width: 160px;
+    }
+
+    .legend-title {
+        font-size: 11px;
+    }
+
+    .legend-row {
+        font-size: 10px;
+        gap: 6px;
+    }
+
+    .legend-toggle-btn {
+        width: 22px;
+        height: 22px;
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 480px) {
+    .map-legend {
+        bottom: 8px;
+        left: 8px;
+        padding: 6px 8px;
+        max-width: 140px;
+    }
 }
 
 /* ============================================================

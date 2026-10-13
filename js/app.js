@@ -1,5 +1,6 @@
 // ============================================================
 // APP.JS — Main Application Logic
+// FloodMap Makassar — Sensor Fusion Dashboard
 // ============================================================
 
 const APP = {
@@ -8,11 +9,14 @@ const APP = {
     thresholdImu: 0.30
 };
 
-let currentAllData = [];
-let currentVehicleData = [];
-let currentFloodData = [];
-let currentOffRoadData = [];
-let currentEvents = {};
+// ============================================================
+// VARIABEL GLOBAL
+// ============================================================
+let currentAllData = [];         // SEMUA data (flood_points)
+let currentVehicleData = [];     // Hanya GPS real (marker peta)
+let currentFloodData = [];       // Genangan di jalan
+let currentOffRoadData = [];     // Genangan di luar jalan
+let currentEvents = {};          // Road events
 
 // ============================================================
 // INIT
@@ -21,11 +25,14 @@ let currentEvents = {};
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 FloodMap Makassar dimulai...');
 
+    // Init map
     initMap();
+
     setupNavigation();
     setupSettings();
     setupMapFilters();
     setupAdminPanel();
+    setupLegendToggle();          // 🔧 Legend collapse/expand
 
     // ============================================================
     // LISTENER: FLOOD POINTS (untuk peta & tabel)
@@ -91,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
         redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData)
             .catch(err => console.error('Map error:', err));
 
+        // Geocoding async
         if (currentVehicleData.length > 0 && typeof prefetchStreetNames === 'function') {
             prefetchStreetNames(currentVehicleData).then(() => {
                 currentAllData.forEach(p => {
@@ -104,73 +112,44 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ============================================================
-    // LISTENER: CURRENT READING (sensor real-time)
-   // ============================================================
-// LISTENER: CURRENT READING (sensor real-time)
-// ============================================================
-let currentReadingCount = 0;   // counter untuk "Langkah ke-"
-
-onCurrentReading((reading) => {
-    if (!reading || !reading.depth) {
-        console.log('⚠️ current_reading kosong / belum ada data');
-        return;
-    }
-
-    currentReadingCount++;
-    console.log(`📡 Current reading #${currentReadingCount}:`, reading);
-
+    // LISTENER: CURRENT READING (sensor real-time 10x/detik)
     // ============================================================
-    // PARSE DATA
-    // ============================================================
-    const depth     = parseFloat(reading.depth) || 0;
-    const imuZ      = parseFloat(reading.imuZ) || 0;
-    const imuMag    = parseFloat(reading.imuMag) || 0;
-    const lat       = parseFloat(reading.latitude) || 0;
-    const lng       = parseFloat(reading.longitude) || 0;
-    const sats      = parseInt(reading.satellites) || 0;
-    const status    = (reading.status || 'aman').toLowerCase();
-    const source    = reading.source || 'fallback';
-
-    // ============================================================
-    // UPDATE SENSOR READOUT — SEMUA FIELD
-    // ============================================================
-
-    // 1. Kedalaman
-    const depthEl = document.getElementById('currentDepth');
-    if (depthEl) {
-        depthEl.textContent = depth.toFixed(1) + ' cm';
-        depthEl.style.color = status === 'bahaya' ? '#ef4444' :
-                              status === 'siaga'  ? '#f59e0b' : '#22c55e';
-    }
-
-    // 2. Akselerasi Z
-    const imuEl = document.getElementById('currentImu');
-    if (imuEl) {
-        imuEl.textContent = imuZ.toFixed(2) + ' g';
-        imuEl.style.color = Math.abs(imuZ) > 0.5 ? '#f59e0b' : '#0f172a';
-    }
-
-    // 3. Koordinat
-    const coordEl = document.getElementById('currentCoord');
-    if (coordEl) {
-        coordEl.textContent = lat.toFixed(6) + '°, ' + lng.toFixed(6) + '°';
-
-        // Warna berdasarkan source
-        if (source === 'gps' && sats >= 4) {
-            coordEl.style.color = '#22c55e';   // hijau = GPS akurat
-        } else {
-            coordEl.style.color = '#f59e0b';   // kuning = fallback
+    onCurrentReading((reading) => {
+        if (!reading || !reading.depth) {
+            console.log('⚠️ current_reading kosong');
+            return;
         }
-    }
 
+        const depth  = parseFloat(reading.depth) || 0;
+        const imuZ   = parseFloat(reading.imuZ) || 0;
+        const lat    = parseFloat(reading.latitude) || 0;
+        const lng    = parseFloat(reading.longitude) || 0;
+        const sats   = parseInt(reading.satellites) || 0;
+        const status = (reading.status || 'aman').toLowerCase();
+        const source = reading.source || 'fallback';
 
-    // 5. Source badge (opsional — jika ada elemennya)
-    const srcEl = document.getElementById('currentSource');
-    if (srcEl) {
-        srcEl.textContent = source === 'gps' ? `GPS (${sats} sat)` : 'Fallback';
-        srcEl.style.color = source === 'gps' ? '#22c55e' : '#f59e0b';
-    }
-});
+        // 1. Kedalaman
+        const depthEl = document.getElementById('currentDepth');
+        if (depthEl) {
+            depthEl.textContent = depth.toFixed(1) + ' cm';
+            depthEl.style.color = status === 'bahaya' ? '#ef4444' :
+                                  status === 'siaga'  ? '#f59e0b' : '#22c55e';
+        }
+
+        // 2. Akselerasi Z
+        const imuEl = document.getElementById('currentImu');
+        if (imuEl) {
+            imuEl.textContent = imuZ.toFixed(2) + ' g';
+            imuEl.style.color = Math.abs(imuZ) > 0.5 ? '#f59e0b' : '#0f172a';
+        }
+
+        // 3. Koordinat
+        const coordEl = document.getElementById('currentCoord');
+        if (coordEl) {
+            coordEl.textContent = lat.toFixed(6) + '°, ' + lng.toFixed(6) + '°';
+            coordEl.style.color = (source === 'gps' && sats >= 4) ? '#22c55e' : '#f59e0b';
+        }
+    });
 
     // ============================================================
     // LISTENER: ROAD EVENTS
@@ -218,7 +197,9 @@ onCurrentReading((reading) => {
 
     setupExportButtons();
 
-    // Tombol focus kendaraan
+    // ============================================================
+    // TOMBOL FOCUS KENDARAAN
+    // ============================================================
     const btnFocus = document.getElementById('btnFocusVehicle');
     if (btnFocus) {
         btnFocus.addEventListener('click', () => {
@@ -236,6 +217,41 @@ onCurrentReading((reading) => {
         });
     }
 });
+
+// ============================================================
+// LEGEND TOGGLE — collapse/expand
+// ============================================================
+
+function setupLegendToggle() {
+    const legend = document.getElementById('mapLegend');
+    const toggle = document.getElementById('legendToggle');
+
+    if (!legend || !toggle) {
+        console.warn('⚠️ Legend elements tidak ditemukan');
+        return;
+    }
+
+    toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        legend.classList.toggle('collapsed');
+
+        const isCollapsed = legend.classList.contains('collapsed');
+        localStorage.setItem('legendCollapsed', isCollapsed);
+    });
+
+    // Restore state
+    const savedState = localStorage.getItem('legendCollapsed');
+    if (savedState === 'true') {
+        legend.classList.add('collapsed');
+    }
+
+    // Auto-collapse di mobile saat pertama load
+    if (window.innerWidth <= 768 && savedState === null) {
+        legend.classList.add('collapsed');
+    }
+
+    console.log('✅ Legend toggle ready');
+}
 
 // ============================================================
 // NAVIGATION
@@ -329,7 +345,7 @@ function setupSettings() {
 }
 
 // ============================================================
-// ADMIN PANEL
+// 🔒 ADMIN PANEL — HIDDEN
 // ============================================================
 
 let adminUnlocked = false;
@@ -483,7 +499,7 @@ function updateEventsTable(events) {
 }
 
 // ============================================================
-// EXPORT
+// EXPORT BUTTONS
 // ============================================================
 
 function setupExportButtons() {

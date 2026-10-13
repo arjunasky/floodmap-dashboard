@@ -152,19 +152,28 @@
                 <button class="map-focus-btn" id="btnFocusVehicle" title="Fokus ke kendaraan">
                     <i class="ti ti-current-location"></i>
                 </button>
-                <div class="map-legend">
-                    <div class="legend-title">📍 Legenda</div>
-                    <div class="legend-section">
-                        <div class="legend-subtitle">Genangan</div>
-                        <div class="legend-row"><span class="legend-line" style="background:#22c55e;"></span> Aman (&lt;10 cm)</div>
-                        <div class="legend-row"><span class="legend-line" style="background:#f59e0b;"></span> Siaga (10–20 cm)</div>
-                        <div class="legend-row"><span class="legend-line" style="background:#ef4444;"></span> Bahaya (&gt;20 cm)</div>
+                <div class="map-legend" id="mapLegend">
+                    <div class="legend-header" id="legendToggle">
+                        <span class="legend-title">📍 Legenda</span>
+                        <button class="legend-toggle-btn" aria-label="Toggle Legend">
+                            <i class="ti ti-chevron-up" id="legendChevron"></i>
+                        </button>
                     </div>
-                    <div class="legend-section">
-                        <div class="legend-subtitle">Event Jalan</div>
-                        <div class="legend-row"><span class="legend-dot" style="background:#dc2626;"></span> 🕳️ Lubang</div>
-                        <div class="legend-row"><span class="legend-dot" style="background:#f59e0b;"></span> 🚧 Polisi Tidur</div>
-                        <div class="legend-row"><span class="legend-dot" style="background:#3b82f6;"></span> Kendaraan</div>
+                    
+                    <div class="legend-content" id="legendContent">
+                        <div class="legend-section">
+                            <div class="legend-subtitle">GENANGAN</div>
+                            <div class="legend-row"><span class="legend-line" style="background:#22c55e;"></span> Aman (&lt;10 cm)</div>
+                            <div class="legend-row"><span class="legend-line" style="background:#f59e0b;"></span> Siaga (10–20 cm)</div>
+                            <div class="legend-row"><span class="legend-line" style="background:#ef4444;"></span> Bahaya (&gt;20 cm)</div>
+                        </div>
+                        
+                        <div class="legend-section">
+                            <div class="legend-subtitle">EVENT JALAN</div>
+                            <div class="legend-row"><span class="legend-dot" style="background:#dc2626;"></span> Lubang</div>
+                            <div class="legend-row"><span class="legend-dot" style="background:#f59e0b;"></span> Polisi Tidur</div>
+                            <div class="legend-row"><span class="legend-dot" style="background:#3b82f6;"></span> Kendaraan</div>
+                        </div>
                     </div>
                 </div>
                 <div class="map-stats-floating" id="mapStats">
