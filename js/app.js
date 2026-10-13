@@ -163,11 +163,6 @@ onCurrentReading((reading) => {
         }
     }
 
-    // 4. Langkah ke- (counter readings)
-    const stepEl = document.getElementById('currentStep');
-    if (stepEl) {
-        stepEl.textContent = currentReadingCount;
-    }
 
     // 5. Source badge (opsional — jika ada elemennya)
     const srcEl = document.getElementById('currentSource');
