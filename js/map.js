@@ -123,16 +123,16 @@ let isFirstLoad = true;
 function redrawMapFromData(allData, floodData) {
     if (!map || !floodLayerGroup) return;
 
-    // Kalau cuma 1 argumen, anggap floodData = allData
-    if (!floodData) floodData = allData;
+    // Kalau floodData tidak dikirim, kosongkan polyline
+    if (!floodData) floodData = [];
 
-    // ---- Clear layer polyline ----
+    // Clear layer polyline
     floodLayerGroup.clearLayers();
     segmentPolylines = {};
     totalDistance = 0;
 
-    // ---- RENDER POLYLINE (hanya data genangan) ----
-    if (floodData && floodData.length > 0) {
+    // ---- RENDER POLYLINE (dari floodData) ----
+    if (floodData.length > 0) {
         const segments = {};
         floodData.forEach(p => {
             if (!p.segment_id) return;
@@ -170,38 +170,18 @@ function redrawMapFromData(allData, floodData) {
                     <strong style="color:${color}; font-size:13px;">● ${category.toUpperCase()}</strong><br>
                     <strong>Segmen:</strong> ${sid}<br>
                     <strong>Panjang:</strong> ${segLength.toFixed(1)} m<br>
-                    <strong>Rata-rata depth:</strong> ${avgDepth.toFixed(1)} cm<br>
-                    <strong>Titik:</strong> ${points.length}
+                    <strong>Rata-rata depth:</strong> ${avgDepth.toFixed(1)} cm
                 </div>
             `);
 
             floodLayerGroup.addLayer(polyline);
             segmentPolylines[sid] = polyline;
-
-            // Titik-titik marker
-            points.forEach(p => {
-                const dot = L.circleMarker([p.latitude, p.longitude], {
-                    radius: 3,
-                    color: color,
-                    fillColor: color,
-                    fillOpacity: 0.8,
-                    weight: 1
-                });
-                dot.bindPopup(`
-                    <div style="font-family:Inter; font-size:11px;">
-                        <strong>Depth:</strong> ${p.depth} cm<br>
-                        <strong>Waktu:</strong> ${new Date(p.timestamp).toLocaleTimeString('id-ID')}
-                    </div>
-                `);
-                floodLayerGroup.addLayer(dot);
-            });
         });
     }
 
-    // ---- RENDER VEHICLE MARKER (semua data) ----
+    // ---- RENDER VEHICLE MARKER (dari allData) ----
     if (allData && allData.length > 0) {
-        const sorted = [...allData].sort((a, b) => a.timestamp - b.timestamp);
-        const last = sorted[sorted.length - 1];
+        const last = allData[allData.length - 1];
 
         if (vehicleMarker) {
             if (!map.hasLayer(vehicleMarker)) {
@@ -211,11 +191,11 @@ function redrawMapFromData(allData, floodData) {
             vehicleMarker.setZIndexOffset(1000);
         }
 
-        // ---- AUTO-FOCUS saat pertama load ----
+        // Auto-focus saat pertama load
         if (isFirstLoad) {
             isFirstLoad = false;
             map.setView([last.latitude, last.longitude], 17);
-            console.log(`📍 Auto-focus ke kendaraan: ${last.latitude.toFixed(6)}, ${last.longitude.toFixed(6)}`);
+            console.log(`📍 Auto-focus: ${last.latitude.toFixed(6)}, ${last.longitude.toFixed(6)}`);
         }
     }
 
