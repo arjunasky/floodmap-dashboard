@@ -38,12 +38,12 @@ function getLocationName(p) {
         if (geocodeCache[key]) return geocodeCache[key];
     }
 
-    // 2. Kalau data punya location valid (bukan "-" / kosong / "Auto")
+    // 2. Kalau data punya location valid
     if (p.location && p.location !== '-' && p.location !== '' && p.location !== 'Auto') {
         return p.location;
     }
 
-    // 3. Fallback: tampilkan koordinat
+    // 3. Fallback: koordinat
     return `Koordinat ${(p.latitude||0).toFixed(4)}, ${(p.longitude||0).toFixed(4)}`;
 }
 
@@ -91,7 +91,7 @@ function updateUI(dataArray) {
         }).join('');
     }
 
-    // ---- Sensor readout (data terbaru) ----
+    // ---- Sensor readout ----
     const last = [...dataArray].sort((a, b) => b.timestamp - a.timestamp)[0];
     if (last) {
         const depthEl = document.getElementById('currentDepth');
@@ -196,6 +196,52 @@ function updateNotif(dataArray) {
 }
 
 // ============================================================
+// 🔧 OFF-ROAD STATS — sensor baca genangan di luar jalan
+// ============================================================
+
+function updateOffRoadStats(offRoadData) {
+    const el = document.getElementById('offRoadStats');
+    if (!el) return;
+
+    if (!offRoadData || offRoadData.length === 0) {
+        el.innerHTML = `
+            <div class="offroad-stat-item">
+                <span class="offroad-stat-value" style="color:#94a3b8;">0</span>
+                <span class="offroad-stat-label">Titik di Luar Jalan</span>
+            </div>
+            <div class="offroad-stat-item">
+                <span class="offroad-stat-value" style="color:#94a3b8;">0.0</span>
+                <span class="offroad-stat-label">Rata-rata (cm)</span>
+            </div>
+            <div class="offroad-stat-item">
+                <span class="offroad-stat-value" style="color:#94a3b8;">0.0</span>
+                <span class="offroad-stat-label">Maks (cm)</span>
+            </div>
+        `;
+        return;
+    }
+
+    const total = offRoadData.length;
+    const avgDepth = offRoadData.reduce((s, p) => s + (p.depth || 0), 0) / total;
+    const maxDepth = Math.max(...offRoadData.map(p => p.depth || 0));
+
+    el.innerHTML = `
+        <div class="offroad-stat-item">
+            <span class="offroad-stat-value" style="color:#f59e0b;">${total}</span>
+            <span class="offroad-stat-label">Titik di Luar Jalan</span>
+        </div>
+        <div class="offroad-stat-item">
+            <span class="offroad-stat-value" style="color:#64748b;">${avgDepth.toFixed(1)}</span>
+            <span class="offroad-stat-label">Rata-rata (cm)</span>
+        </div>
+        <div class="offroad-stat-item">
+            <span class="offroad-stat-value" style="color:#ef4444;">${maxDepth.toFixed(1)}</span>
+            <span class="offroad-stat-label">Maks (cm)</span>
+        </div>
+    `;
+}
+
+// ============================================================
 // SENSOR STATUS (Sidebar)
 // ============================================================
 
@@ -246,11 +292,12 @@ setInterval(updateClock, 1000);
 updateClock();
 
 // ============================================================
-// EXPORT GLOBAL (untuk dipakai modul lain)
+// EXPORT GLOBAL
 // ============================================================
 
 window.getLocationName = getLocationName;
 window.formatTime = formatTime;
 window.getStatusLabel = getStatusLabel;
+window.updateOffRoadStats = updateOffRoadStats;
 
 console.log('✅ ui.js loaded');

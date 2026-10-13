@@ -37,9 +37,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 longitude:  parseFloat(p.longitude),
                 depth:      parseFloat(p.depth) || 0,
                 status:     (p.status || 'aman').toLowerCase(),
-                location:   p.location || '-',           // ← placeholder
+                location:   p.location || '-',
                 timestamp:  p.timestamp || Date.now(),
                 imuZ:       parseFloat(p.imuZ) || 0,
+                imuMag:     parseFloat(p.imuMag) || 0,
+                pitch:      parseFloat(p.pitch) || 0,
+                roll:       parseFloat(p.roll) || 0,
                 segment_id: p.segment_id || '',
                 depth_valid: p.depth_valid !== false,
                 source:     p.source || 'gps'
@@ -47,38 +50,57 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
     
+        // Data kendaraan (semua titik GPS)
         currentVehicleData = allData.filter(p => p.source === 'gps');
-        currentFloodData = allData.filter(p =>
-            p.source === 'gps' && p.depth > 0 && p.segment_id && p.depth_valid !== false
+    
+        // ============================================================
+        // 🔧 PISAHKAN: titik dengan genangan vs tidak
+        // ============================================================
+        const withFlood = allData.filter(p => 
+            p.source === 'gps' && 
+            p.depth > 0 && 
+            p.segment_id
         );
     
-        // Update UI dulu dengan data mentah
+        // Road matching untuk cek mana yang di jalan
+        if (withFlood.length > 0) {
+            const matched = await matchToRoad(withFlood);
+            
+            // 🔧 DUA KATEGORI
+            currentFloodData = matched.filter(p => p.matched);      // ✅ DI JALAN
+            currentOffRoadData = matched.filter(p => !p.matched);   // ⚠️ DI LUAR JALAN
+    
+            console.log(`💧 Genangan di jalan: ${currentFloodData.length}`);
+            console.log(`⚠️  Genangan di luar jalan: ${currentOffRoadData.length}`);
+            console.log(`📊 Total sensor baca genangan: ${withFlood.length}`);
+        } else {
+            currentFloodData = [];
+            currentOffRoadData = [];
+        }
+    
+        // Update UI
         updateUI(currentVehicleData);
         updateHistoryTable(currentVehicleData);
         updateNotif(currentVehicleData);
         updateCharts(currentFloodData);
-        redrawMapFromData(currentVehicleData, currentFloodData);
+        updateOffRoadStats(currentOffRoadData);
+        redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData);
     
-        // 🔧 Geocoding async — update nama jalan setelah selesai
+        // Geocoding async
         if (currentVehicleData.length > 0) {
             prefetchStreetNames(currentVehicleData).then(() => {
-                // Update nama jalan di setiap data
                 currentVehicleData.forEach(p => {
                     const name = geocodeCache[gridKey(p.latitude, p.longitude)];
                     if (name) p.location = name;
                 });
-                currentFloodData.forEach(p => {
-                    const name = geocodeCache[gridKey(p.latitude, p.longitude)];
-                    if (name) p.location = name;
-                });
-    
-                // Refresh UI dengan nama jalan baru
                 updateUI(currentVehicleData);
                 updateHistoryTable(currentVehicleData);
-                redrawMapFromData(currentVehicleData, currentFloodData);
             });
         }
     });
+    
+    // Deklarasi variabel baru di atas
+    let currentOffRoadData = [];
 
     // ---- Listener: road events ----
     onRoadEvents((data) => {
