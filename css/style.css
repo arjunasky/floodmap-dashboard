@@ -26,6 +26,31 @@
     --green: #22c55e;
 }
 
+/* ============================================================
+   FIX POINTER-EVENTS — pastikan bisa diklik
+   ============================================================ */
+
+   .sidebar {
+    pointer-events: auto !important;
+}
+
+.sidebar * {
+    pointer-events: auto;
+}
+
+.nav-link {
+    pointer-events: auto !important;
+    cursor: pointer;
+}
+
+.sidebar-overlay {
+    pointer-events: auto;
+}
+
+.sidebar-overlay:not(.active) {
+    pointer-events: none;
+}
+
 body {
     font-family: var(--font);
     background: var(--bg-body);
