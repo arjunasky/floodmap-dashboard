@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8" />
+    <title>Simulator ESP32 — Internal</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+</head>
+<body style="padding:40px; max-width:900px; margin:0 auto; background:#f0f2f5;">
+    <div class="panel">
+        <div class="panel-header"><i class="ti ti-flask"></i> Simulator ESP32 (Internal Use Only)</div>
+        <div class="panel-body" style="padding:24px;">
+            <p style="color:#64748b; margin-bottom:20px; font-size:13px;">
+                Halaman ini tidak ditautkan di dashboard utama. Data yang dikirim muncul di <code>/index.html</code>.
+            </p>
+            <div class="setting-group"><label>Kecepatan (ms)</label><input type="number" id="simSpeed" value="1500" class="setting-input" /></div>
+            <div class="setting-group"><label>Threshold Siaga (cm)</label><input type="number" id="thresholdSiaga" value="10" class="setting-input" /></div>
+            <div class="setting-group"><label>Threshold Bahaya (cm)</label><input type="number" id="thresholdBahaya" value="20" class="setting-input" /></div>
+
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:20px;">
+                <button class="btn primary" id="btnStart"><i class="ti ti-player-play"></i> Mulai</button>
+                <button class="btn danger" id="btnStop"><i class="ti ti-player-pause"></i> Stop</button>
+                <button class="btn outline" id="btnReset"><i class="ti ti-refresh"></i> Reset</button>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+                <button class="btn outline" id="btnOne"><i class="ti ti-plus"></i> Kirim 1 Data</button>
+                <button class="btn outline" id="btnBatch"><i class="ti ti-stack"></i> Kirim 20 Data</button>
+                <button class="btn danger" id="btnClear"><i class="ti ti-trash"></i> Hapus Semua</button>
+            </div>
+
+            <div style="margin-top:24px; padding:16px; background:#f8fafc; border-radius:8px; max-height:400px; overflow-y:auto;">
+                <div id="simLog" style="font-family:monospace; font-size:12px;">Menunggu perintah...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/firebase-config.js"></script>
+    <script src="js/simulator.js"></script>
+</body>
+</html>

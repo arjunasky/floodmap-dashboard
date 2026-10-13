@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPS Live Track — FloodMap</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: #f0f2f5;
+            color: #0f172a;
+            padding: 20px;
+        }
+
+        .container { max-width: 1100px; margin: 0 auto; }
+
+        .header {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-bottom: 16px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .header h1 { font-size: 20px; margin-bottom: 4px; }
+        .header p { font-size: 13px; color: #64748b; }
+
+        .status-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-badge.online { background: #dcfce7; color: #15803d; }
+        .status-badge.offline { background: #fee2e2; color: #dc2626; }
+        .status-badge.waiting { background: #fef3c7; color: #d97706; }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .controls {
+            background: #fff;
+            border-radius: 12px;
+            padding: 14px 20px;
+            margin-bottom: 16px;
+            border: 1px solid #e2e8f0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .btn-primary { background: #3b82f6; color: #fff; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-danger { background: #ef4444; color: #fff; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-outline {
+            background: #fff;
+            color: #475569;
+            border: 1px solid #cbd5e1;
+        }
+        .btn-outline:hover { background: #f8fafc; }
+
+        .info-text {
+            font-size: 12px;
+            color: #64748b;
+            margin-left: auto;
+        }
+
+        #map {
+            height: 520px;
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            margin-bottom: 16px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        .stat-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px 18px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+
+        .stat-card .label {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        .stat-card .value {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .stat-card .value.small { font-size: 14px; }
+
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            #map { height: 400px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <div class="header">
+        <div>
+            <h1>📡 GPS Live Track</h1>
+            <p>Data real-time dari ESP32 + GPS NEO-7M via Firebase</p>
+        </div>
+        <div class="status-badge waiting" id="statusBadge">
+            <span class="dot"></span>
+            <span id="statusText">Menunggu data...</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-primary" id="btnCenterMap">🎯 Fokus ke Kendaraan</button>
+        <button class="btn btn-outline" id="btnFitBounds">🔍 Tampilkan Semua</button>
+        <button class="btn btn-danger" id="btnClearTrack">🗑 Hapus Track</button>
+        <span class="info-text" id="lastUpdate">Terakhir: --:--:--</span>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <span class="label">Total Titik</span>
+            <span class="value" id="totalPoints">0</span>
+        </div>
+        <div class="stat-card">
+            <span class="label">Total Jarak</span>
+            <span class="value" id="totalDistance">0 m</span>
+        </div>
+        <div class="stat-card">
+            <span class="label">Koordinat</span>
+            <span class="value small" id="currentCoords">-</span>
+        </div>
+        <div class="stat-card">
+            <span class="label">Satelit</span>
+            <span class="value" id="currentSat">-</span>
+        </div>
+    </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+
+<script>
+// ============================================================
+// FIREBASE CONFIG
+// ============================================================
+
+const firebaseConfig = {
+    apiKey: "AIzaSyBa4KYMhfrQ_PwKBMyH97T0LQcJmngeAkk",
+    authDomain: "geo-flood-5cfc6.firebaseapp.com",
+    databaseURL: "https://geo-flood-5cfc6-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "geo-flood-5cfc6",
+    storageBucket: "geo-flood-5cfc6.appspot.com",
+    messagingSenderId: "139914213706",
+    appId: "1:139914213706:web:22ef534f45fa86245a69b3"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// ============================================================
+// VARIABEL GLOBAL
+// ============================================================
+
+let map;
+let polyline;
+let vehicleMarker;
+let trackPoints = [];
+let totalDistance = 0;
+let lastPoint = null;
+
+const MAP_CENTER = [-5.1464, 119.4396];
+const MAP_ZOOM = 16;
+
+// ============================================================
+// INISIALISASI PETA
+// ============================================================
+
+function initMap() {
+    map = L.map('map').setView(MAP_CENTER, MAP_ZOOM);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    polyline = L.polyline([], {
+        color: '#3b82f6',
+        weight: 6,
+        opacity: 0.85,
+        lineJoin: 'round',
+        lineCap: 'round'
+    }).addTo(map);
+
+    vehicleMarker = L.marker(MAP_CENTER, {
+        icon: L.divIcon({
+            className: 'vehicle-icon',
+            html: '<div style="background:#3b82f6; width:18px; height:18px; border-radius:50%; border:3px solid #fff; box-shadow: 0 0 10px rgba(59,130,246,0.7);"></div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        })
+    }).addTo(map);
+
+    console.log('✅ Peta siap');
+}
+
+// ============================================================
+// LISTENER FIREBASE — /gps_track
+// ============================================================
+
+function listenFirebase() {
+    db.ref('gps_track').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data) {
+            updateStatus('waiting', 'Menunggu data...');
+            return;
+        }
+
+        // Konversi objek → array, urutkan by timestamp
+        const points = Object.values(data)
+            .filter(p => p.lat && p.lng)
+            .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+        if (points.length === 0) return;
+
+        trackPoints = points;
+        redrawTrack();
+        updateStatus('online', `Live (${points.length} titik)`);
+
+        // Cek apakah ESP32 masih aktif (data < 10 detik)
+        const latest = points[points.length - 1];
+        const age = Date.now() - (latest.timestamp || 0);
+        if (age > 30000) {
+            updateStatus('offline', 'ESP32 tidak aktif');
+        }
+    }, (error) => {
+        console.error('Firebase error:', error);
+        updateStatus('offline', 'Koneksi Firebase gagal');
+    });
+}
+
+// ============================================================
+// REDRAW POLYLINE
+// ============================================================
+
+function redrawTrack() {
+    if (trackPoints.length === 0) return;
+
+    // Update polyline
+    const path = trackPoints.map(p => [p.lat, p.lng]);
+    polyline.setLatLngs(path);
+
+    // Hitung total jarak
+    totalDistance = 0;
+    for (let i = 1; i < path.length; i++) {
+        const a = L.latLng(path[i-1]);
+        const b = L.latLng(path[i]);
+        totalDistance += a.distanceTo(b);
+    }
+
+    // Update marker ke titik terakhir
+    const last = trackPoints[trackPoints.length - 1];
+    vehicleMarker.setLatLng([last.lat, last.lng]);
+
+    // Update UI
+    document.getElementById('totalPoints').textContent = trackPoints.length;
+    document.getElementById('totalDistance').textContent =
+        totalDistance > 1000
+            ? (totalDistance / 1000).toFixed(2) + ' km'
+            : totalDistance.toFixed(1) + ' m';
+    document.getElementById('currentCoords').textContent =
+        last.lat.toFixed(5) + ', ' + last.lng.toFixed(5);
+    document.getElementById('currentSat').textContent =
+        last.satellites || '-';
+    document.getElementById('lastUpdate').textContent =
+        'Terakhir: ' + new Date().toLocaleTimeString('id-ID');
+
+    // Auto-focus peta ke marker (hanya jika user tidak zoom manual)
+    // map.panTo([last.lat, last.lng]); // ← uncomment jika ingin auto-pan
+}
+
+// ============================================================
+// STATUS BADGE
+// ============================================================
+
+function updateStatus(type, text) {
+    const badge = document.getElementById('statusBadge');
+    badge.className = 'status-badge ' + type;
+    document.getElementById('statusText').textContent = text;
+}
+
+// ============================================================
+// CONTROLS
+// ============================================================
+
+document.getElementById('btnCenterMap').addEventListener('click', () => {
+    if (trackPoints.length === 0) return;
+    const last = trackPoints[trackPoints.length - 1];
+    map.setView([last.lat, last.lng], 17);
+});
+
+document.getElementById('btnFitBounds').addEventListener('click', () => {
+    if (trackPoints.length === 0) return;
+    const bounds = L.latLngBounds(trackPoints.map(p => [p.lat, p.lng]));
+    map.fitBounds(bounds, { padding: [40, 40] });
+});
+
+document.getElementById('btnClearTrack').addEventListener('click', () => {
+    if (!confirm('Hapus semua data GPS track dari Firebase?')) return;
+    db.ref('gps_track').remove()
+        .then(() => {
+            trackPoints = [];
+            polyline.setLatLngs([]);
+            totalDistance = 0;
+            document.getElementById('totalPoints').textContent = '0';
+            document.getElementById('totalDistance').textContent = '0 m';
+            document.getElementById('currentCoords').textContent = '-';
+            document.getElementById('currentSat').textContent = '-';
+            updateStatus('waiting', 'Track dihapus');
+        })
+        .catch(err => alert('Gagal: ' + err.message));
+});
+
+// ============================================================
+// INIT
+// ============================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    listenFirebase();
+    console.log('🚀 GPS Live Track siap');
+});
+</script>
+
+</body>
+</html>

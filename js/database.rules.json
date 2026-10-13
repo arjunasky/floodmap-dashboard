@@ -1,0 +1,18 @@
+{
+  "rules": {
+    "flood_points": {
+      ".read": true,
+      ".write": true,
+      ".indexOn": ["timestamp", "segment_id"]
+    },
+    "research_data": {
+      ".read": true,
+      ".write": true,
+      ".indexOn": ["timestamp", "scenario", "sub"]
+    },
+    "system_status": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

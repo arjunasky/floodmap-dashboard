@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FloodMap — Dashboard Genangan Makassar</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="app-container">
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">🌊</div>
+            <span class="brand-text">Flood<span style="color:#3b82f6;">Map</span></span>
+            <span class="brand-location">Makassar</span>
+        </div>
+        <nav class="nav-menu">
+            <a href="#" class="nav-link active" data-page="map"><i class="ti ti-map"></i><span>Peta Genangan</span></a>
+            <a href="#" class="nav-link" data-page="history"><i class="ti ti-list-details"></i><span>Riwayat Data</span></a>
+            <a href="#" class="nav-link" data-page="stats"><i class="ti ti-chart-bar"></i><span>Statistik</span></a>
+            <a href="#" class="nav-link" data-page="events"><i class="ti ti-alert-road"></i><span>Event Jalan</span></a>
+            <a href="#" class="nav-link" data-page="settings"><i class="ti ti-settings"></i><span>Konfigurasi</span></a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="sensor-status-panel">
+                <p>Status Sensor</p>
+                <div class="sensor-item"><span>JSN-SR04T</span> <span class="badge" id="statusSensor">Menunggu</span></div>
+                <div class="sensor-item"><span>MPU6050</span> <span class="badge" id="statusImu">Menunggu</span></div>
+                <div class="sensor-item"><span>GPS NEO-7M</span> <span class="badge" id="statusGps">Menunggu</span></div>
+                <div class="sensor-item"><span>ESP32</span> <span class="badge" id="statusEsp">Offline</span></div>
+            </div>
+            <div class="notification-panel">
+                <p>Notifikasi</p>
+                <div id="notifBox"><div class="notif-item info">Sistem siap memantau genangan</div></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main-wrapper">
+        <header class="topbar">
+            <div class="topbar-left">
+                <button class="menu-toggle" id="menuToggle"><i class="ti ti-menu-2"></i></button>
+                <h1 id="pageTitle">Peta Genangan</h1>
+                <span class="live-badge"><span class="dot-pulse"></span> Live</span>
+            </div>
+            <div class="topbar-right">
+                <span class="connection-status" id="connStatus">
+                    <i class="ti ti-wifi"></i> Menghubungkan...
+                </span>
+                <span class="divider">|</span>
+                <span class="conn-indicator" id="espIndicator">
+                    <i class="ti ti-circle-filled" style="color:#94a3b8;"></i> ESP32 Offline
+                </span>
+                <span class="divider">|</span>
+                <span class="last-update" id="lastUpdate">Update: --:--:--</span>
+                <span class="divider">|</span>
+                <i class="ti ti-clock"></i>
+                <span id="clockDisplay">--:--:--</span>
+            </div>
+        </header>
+
+        <!-- PAGE MAP -->
+        <section class="page-content active" id="page-map">
+            <div class="stats-grid">
+                <div class="stat-card glass">
+                    <div class="stat-icon blue"><i class="ti ti-map-pin"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">Total Titik</span>
+                        <span class="stat-value" id="totalPoints">0</span>
+                        <span class="stat-sub">Terdeteksi</span>
+                    </div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon green"><i class="ti ti-circle-check"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">Aman</span>
+                        <span class="stat-value" id="amanCount" style="color:#22c55e;">0</span>
+                        <span class="stat-sub">&lt; 10 cm</span>
+                    </div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon yellow"><i class="ti ti-alert-circle"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">Siaga</span>
+                        <span class="stat-value" id="siagaCount" style="color:#f59e0b;">0</span>
+                        <span class="stat-sub">10–20 cm</span>
+                    </div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon red"><i class="ti ti-alert-triangle"></i></div>
+                    <div class="stat-info">
+                        <span class="stat-label">Bahaya</span>
+                        <span class="stat-value" id="bahayaCount" style="color:#ef4444;">0</span>
+                        <span class="stat-sub">&gt; 20 cm</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Filter Bar -->
+            <div class="map-filter-bar">
+                <span class="filter-label"><i class="ti ti-filter"></i> Tampilkan:</span>
+                <label class="filter-check"><input type="checkbox" id="filterFlood" checked> <span>Genangan</span></label>
+                <label class="filter-check"><input type="checkbox" id="filterPothole" checked> <span>🕳️ Lubang</span></label>
+                <label class="filter-check"><input type="checkbox" id="filterBump" checked> <span>🚧 Polisi Tidur</span></label>
+                <label class="filter-check"><input type="checkbox" id="filterVehicle" checked> <span>Kendaraan</span></label>
+                <button class="btn-filter" id="btnFitBounds"><i class="ti ti-arrows-maximize"></i> Fit</button>
+                <button class="btn-filter" id="btnClearView"><i class="ti ti-refresh"></i> Reset</button>
+            </div>
+
+            <div class="map-wrapper">
+                <div id="map"></div>
+                <div class="map-legend">
+                    <div class="legend-title">📍 Legenda</div>
+                    <div class="legend-section">
+                        <div class="legend-subtitle">Genangan</div>
+                        <div class="legend-row"><span class="legend-line" style="background:#22c55e;"></span> Aman (&lt;10 cm)</div>
+                        <div class="legend-row"><span class="legend-line" style="background:#f59e0b;"></span> Siaga (10–20 cm)</div>
+                        <div class="legend-row"><span class="legend-line" style="background:#ef4444;"></span> Bahaya (&gt;20 cm)</div>
+                    </div>
+                    <div class="legend-section">
+                        <div class="legend-subtitle">Event Jalan</div>
+                        <div class="legend-row"><span class="legend-dot" style="background:#dc2626;"></span> 🕳️ Lubang</div>
+                        <div class="legend-row"><span class="legend-dot" style="background:#f59e0b;"></span> 🚧 Polisi Tidur</div>
+                        <div class="legend-row"><span class="legend-dot" style="background:#3b82f6;"></span> Kendaraan</div>
+                    </div>
+                </div>
+                <div class="map-stats-floating" id="mapStats">
+                    <div class="map-stat-item">
+                        <span class="map-stat-value" id="floatPoints">0</span>
+                        <span class="map-stat-label">titik</span>
+                    </div>
+                    <div class="map-stat-item">
+                        <span class="map-stat-value" id="floatEvents">0</span>
+                        <span class="map-stat-label">event</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bottom-grid">
+                <div class="panel">
+                    <div class="panel-header"><i class="ti ti-list"></i> Data Terbaru <span class="panel-sub">(10 data)</span></div>
+                    <div class="panel-body table-wrap">
+                        <table>
+                            <thead><tr><th>Waktu</th><th>Lokasi</th><th>Kedalaman</th><th>Status</th></tr></thead>
+                            <tbody id="tableBody"><tr><td colspan="4" class="empty">Belum ada data</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header"><i class="ti ti-device-analytics"></i> Sensor Saat Ini</div>
+                    <div class="panel-body sensor-readout">
+                        <div class="sensor-row"><span><i class="ti ti-wave-square"></i> Kedalaman</span> <span id="currentDepth" class="val">-- cm</span></div>
+                        <div class="sensor-row"><span><i class="ti ti-gyroscope"></i> Akselerasi Z</span> <span id="currentImu" class="val">-- g</span></div>
+                        <div class="sensor-row"><span><i class="ti ti-satellite"></i> Koordinat</span> <span id="currentCoord" class="val">--° , --°</span></div>
+                        <div class="sensor-row"><span><i class="ti ti-clock"></i> Langkah ke-</span> <span id="currentStep" class="val">0</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE HISTORY -->
+        <section class="page-content" id="page-history">
+            <div class="panel">
+                <div class="panel-header"><i class="ti ti-database"></i> Semua Riwayat <span class="panel-sub" id="historyCount">(0 entri)</span></div>
+                <div class="panel-body table-wrap" style="max-height:600px; overflow-y:auto;">
+                    <table>
+                        <thead><tr><th>#</th><th>Waktu</th><th>Lokasi</th><th>Kedalaman</th><th>Status</th><th>Koordinat</th></tr></thead>
+                        <tbody id="historyTableBody"><tr><td colspan="6" class="empty">Tidak ada riwayat</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE STATS -->
+        <section class="page-content" id="page-stats">
+            <div class="stats-chart-grid">
+                <div class="panel chart-panel">
+                    <div class="panel-header"><i class="ti ti-pie-chart"></i> Persentase Kondisi</div>
+                    <div class="panel-body"><canvas id="donutChart" height="220"></canvas></div>
+                </div>
+                <div class="panel chart-panel">
+                    <div class="panel-header"><i class="ti ti-chart-bar"></i> Tren Kedalaman</div>
+                    <div class="panel-body"><canvas id="barChart" height="220"></canvas></div>
+                </div>
+            </div>
+            <div class="stats-chart-grid" style="margin-top:16px;">
+                <div class="panel chart-panel">
+                    <div class="panel-header"><i class="ti ti-chart-line"></i> Akumulasi Panjang Segmen</div>
+                    <div class="panel-body"><canvas id="lengthChart" height="180"></canvas></div>
+                </div>
+                <div class="panel chart-panel">
+                    <div class="panel-header"><i class="ti ti-alert-road"></i> Distribusi Event Jalan</div>
+                    <div class="panel-body"><canvas id="eventChart" height="180"></canvas></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE EVENTS -->
+        <section class="page-content" id="page-events">
+            <div class="panel">
+                <div class="panel-header">
+                    <i class="ti ti-alert-road"></i> Riwayat Event Jalan
+                    <span class="panel-sub" id="eventCount">(0 entri)</span>
+                </div>
+                <div class="panel-body">
+                    <div class="action-bar-compact">
+                        <button class="btn outline" id="btnExportEventsCSV"><i class="ti ti-download"></i> CSV</button>
+                        <button class="btn outline" id="btnExportEventsJSON"><i class="ti ti-download"></i> JSON</button>
+                        <button class="btn danger" id="btnClearEvents"><i class="ti ti-trash"></i> Hapus Semua</button>
+                    </div>
+                    <div class="table-wrap" style="max-height:560px; overflow-y:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Waktu</th>
+                                    <th>Tipe</th>
+                                    <th>Kekuatan (g)</th>
+                                    <th>Z-axis (g)</th>
+                                    <th>Koordinat</th>
+                                </tr>
+                            </thead>
+                            <tbody id="eventsTableBody">
+                                <tr><td colspan="6" class="empty">Belum ada event</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE SETTINGS -->
+<!-- PAGE SETTINGS -->
+<section class="page-content" id="page-settings">
+    <div class="panel" style="max-width:700px;">
+        <div class="panel-header" id="settingsHeader" style="cursor:default;">
+            <i class="ti ti-adjustments"></i> Pengaturan Sistem
+        </div>
+        <div class="panel-body" style="padding:24px;">
+            <div class="setting-group">
+                <label>Ambang Batas Siaga (cm)</label>
+                <input type="number" id="thresholdSiaga" value="10" class="setting-input" />
+            </div>
+            <div class="setting-group">
+                <label>Ambang Batas Bahaya (cm)</label>
+                <input type="number" id="thresholdBahaya" value="20" class="setting-input" />
+            </div>
+            <div class="setting-group">
+                <label>Threshold IMU Z (g)</label>
+                <input type="number" id="thresholdImu" value="0.30" step="0.01" class="setting-input" />
+            </div>
+            <button class="btn primary" id="btnSaveSettings">
+                <i class="ti ti-device-floppy"></i> Simpan
+            </button>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- 🔒 ADMIN PANEL (HIDDEN — hanya muncul setelah unlock) -->
+    <!-- ============================================ -->
+    <div class="panel admin-panel" id="adminPanel" style="max-width:700px; margin-top:16px; display:none;">
+        <div class="panel-header" style="background:#1e293b; color:#e2e8f0; border-bottom-color:#334155;">
+            <i class="ti ti-shield-lock" style="color:#f59e0b;"></i> Admin Tools
+            <span class="panel-sub" style="color:#94a3b8;">Hati-hati — aksi tidak bisa dibatalkan</span>
+        </div>
+        <div class="panel-body" style="padding:20px; background:#0f172a; color:#cbd5e1;">
+
+            <div class="admin-section">
+                <div class="admin-section-title">
+                    <i class="ti ti-refresh"></i> Reset Tampilan
+                </div>
+                <div class="admin-section-desc">
+                    Reset peta ke posisi awal, hapus semua layer visual. Data di Firebase <strong>tidak dihapus</strong>.
+                </div>
+                <button class="btn admin-btn-warn" id="btnAdminResetView">
+                    <i class="ti ti-eye-off"></i> Reset Tampilan
+                </button>
+            </div>
+
+            <div class="admin-section">
+                <div class="admin-section-title">
+                    <i class="ti ti-trash"></i> Hapus Data Genangan
+                </div>
+                <div class="admin-section-desc">
+                    Hapus <strong>semua</strong> data <code>flood_points</code> dari Firebase. Tidak bisa dikembalikan.
+                </div>
+                <button class="btn admin-btn-danger" id="btnAdminClearFlood">
+                    <i class="ti ti-database-off"></i> Hapus flood_points
+                </button>
+            </div>
+
+            <div class="admin-section">
+                <div class="admin-section-title">
+                    <i class="ti ti-road-off"></i> Hapus Data Event Jalan
+                </div>
+                <div class="admin-section-desc">
+                    Hapus <strong>semua</strong> data <code>road_events</code> (lubang & polisi tidur) dari Firebase.
+                </div>
+                <button class="btn admin-btn-danger" id="btnAdminClearEvents">
+                    <i class="ti ti-trash"></i> Hapus road_events
+                </button>
+            </div>
+
+            <div class="admin-section">
+                <div class="admin-section-title">
+                    <i class="ti ti-alert-octagon"></i> Full Reset
+                </div>
+                <div class="admin-section-desc">
+                    Hapus <strong>SEMUA data</strong> (flood_points + road_events) dan reset tampilan.
+                </div>
+                <button class="btn admin-btn-danger" id="btnAdminFullReset">
+                    <i class="ti ti-bomb"></i> Full Reset
+                </button>
+            </div>
+
+            <div class="admin-section" style="border-top:1px solid #334155; padding-top:14px; margin-top:14px;">
+                <button class="btn admin-btn-ghost" id="btnAdminLock">
+                    <i class="ti ti-lock"></i> Kunci Panel
+                </button>
+            </div>
+
+        </div>
+    </div>
+</section>
+    </main>
+</div>
+
+<!-- SCRIPT ORDER: firebase-config → map → charts → ui → app -->
+<script src="js/firebase-config.js"></script>
+<script src="js/map.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
