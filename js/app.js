@@ -28,30 +28,45 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminPanel();
 
     // ---- Listener: flood points ----
+    // ---- Listener: flood points ----
     onFloodPoints((data) => {
-        currentDataArray = Object.values(data)
-            .filter(p => p.depth > 0 && p.segment_id)
-            .filter(p => p.depth_valid !== false)
-            .map(p => ({
-                latitude:   parseFloat(p.latitude  || p.lat) || 0,
-                longitude:  parseFloat(p.longitude || p.lng) || 0,
-                depth:      parseFloat(p.depth) || 0,
-                status:     (p.status || 'aman').toLowerCase(),
-                location:   p.location || '-',
-                timestamp:  p.timestamp || Date.now(),
-                imuZ:       parseFloat(p.imuZ) || 0,
-                segment_id: p.segment_id,
-                source:     p.source || 'gps'
-            }))
-            .filter(p => p.latitude && p.longitude)
-            .sort((a, b) => a.timestamp - b.timestamp);
+    // Konversi semua data jadi array (untuk kendaraan/track)
+    const allData = Object.values(data)
+        .map(p => ({
+            latitude:   parseFloat(p.latitude  || p.lat) || 0,
+            longitude:  parseFloat(p.longitude || p.lng) || 0,
+            depth:      parseFloat(p.depth) || 0,
+            status:     (p.status || 'aman').toLowerCase(),
+            location:   p.location || '-',
+            timestamp:  p.timestamp || Date.now(),
+            imuZ:       parseFloat(p.imuZ) || 0,
+            segment_id: p.segment_id || '',
+            depth_valid: p.depth_valid !== false,
+            source:     p.source || 'gps'
+        }))
+        .filter(p => p.latitude && p.longitude)
+        .sort((a, b) => a.timestamp - b.timestamp);
 
-        updateUI(currentDataArray);
-        updateHistoryTable(currentDataArray);
-        updateNotif(currentDataArray);
-        updateCharts(currentDataArray);
-        redrawMapFromData(currentDataArray);
-    });
+    // currentDataArray = SEMUA data (untuk kendaraan, tombol focus, dll)
+    currentDataArray = allData;
+
+    // currentFloodArray = HANYA data genangan (untuk polyline)
+    window.currentFloodArray = allData.filter(p => 
+        p.depth > 0 && 
+        p.segment_id && 
+        p.depth_valid !== false
+    );
+
+    console.log(`📥 Total data: ${allData.length} | Genangan: ${window.currentFloodArray.length}`);
+
+    updateUI(currentDataArray);
+    updateHistoryTable(currentDataArray);
+    updateNotif(currentDataArray);
+    updateCharts(currentDataArray);
+    
+    // Polyline hanya dari data genangan
+    redrawMapFromData(currentDataArray, window.currentFloodArray);
+});
 
     // ---- Listener: road events ----
     onRoadEvents((data) => {
