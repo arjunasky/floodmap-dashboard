@@ -114,6 +114,12 @@ function smoothPath(points) {
 // 4. RENDER POLYLINE GENANGAN
 // ============================================================
 
+// ============================================================
+// RENDER POLYLINE GENANGAN + AUTO-FOCUS KENDARAAN
+// ============================================================
+
+let isFirstLoad = true;   // flag auto-focus hanya sekali di awal
+
 function redrawMapFromData(dataArray) {
     if (!map || !floodLayerGroup) return;
 
@@ -127,7 +133,7 @@ function redrawMapFromData(dataArray) {
         return;
     }
 
-    // Group by segment_id
+    // ---- Group by segment_id ----
     const segments = {};
     dataArray.forEach(p => {
         if (!p.segment_id) return;
@@ -135,28 +141,24 @@ function redrawMapFromData(dataArray) {
         segments[p.segment_id].push(p);
     });
 
-    // Process each segment
+    // ---- Process each segment ----
     Object.entries(segments).forEach(([sid, points]) => {
         points.sort((a, b) => a.timestamp - b.timestamp);
         if (points.length < 2) return;
 
-        // Rata-rata depth → warna
         const avgDepth = points.reduce((s, p) => s + (p.depth || 0), 0) / points.length;
         const category = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
         const color = MAP_CONFIG.colors[category];
 
-        // Raw path
         const rawPath = points.map(p => [p.latitude, p.longitude]);
         const path = smoothPath(rawPath);
 
-        // Panjang
         let segLength = 0;
         for (let i = 1; i < path.length; i++) {
             segLength += haversine(path[i-1][0], path[i-1][1], path[i][0], path[i][1]);
         }
         totalDistance += segLength;
 
-        // Polyline
         const polyline = L.polyline(path, {
             color: color,
             weight: MAP_CONFIG.polylineWeight,
@@ -165,22 +167,20 @@ function redrawMapFromData(dataArray) {
             lineCap: 'round'
         });
 
-        // Popup
         polyline.bindPopup(`
             <div style="font-family:Inter; font-size:12px; min-width:180px;">
                 <strong style="color:${color}; font-size:13px;">● ${category.toUpperCase()}</strong><br>
                 <strong>Segmen:</strong> ${sid}<br>
                 <strong>Panjang:</strong> ${segLength.toFixed(1)} m<br>
                 <strong>Rata-rata kedalaman:</strong> ${avgDepth.toFixed(1)} cm<br>
-                <strong>Jumlah titik:</strong> ${points.length}<br>
-                <strong>Lokasi:</strong> ${points[0].location || '-'}
+                <strong>Jumlah titik:</strong> ${points.length}
             </div>
         `);
 
         floodLayerGroup.addLayer(polyline);
         segmentPolylines[sid] = polyline;
 
-        // Marker setiap titik (opsional, untuk zoom tinggi)
+        // Marker titik-titik
         points.forEach(p => {
             const dot = L.circleMarker([p.latitude, p.longitude], {
                 radius: 3,
@@ -199,23 +199,38 @@ function redrawMapFromData(dataArray) {
         });
     });
 
-    // Update vehicle marker
+    // ---- Update vehicle marker ----
     const sorted = [...dataArray].sort((a, b) => a.timestamp - b.timestamp);
     if (sorted.length && vehicleMarker) {
         const last = sorted[sorted.length - 1];
-        vehicleMarker.setLatLng([last.latitude, last.longitude]);
-        if (document.getElementById('filterVehicle').checked) {
+        
+        // Pastikan marker ada di map
+        if (!map.hasLayer(vehicleMarker)) {
             vehicleMarker.addTo(map);
         }
+        
+        vehicleMarker.setLatLng([last.latitude, last.longitude]);
+        vehicleMarker.setZIndexOffset(1000);
     }
 
-    // Fit bounds
+    // ============================================================
+    // 🔧 AUTO-FOCUS KE KENDARAAN (hanya sekali di awal load)
+    // ============================================================
+    if (isFirstLoad && sorted.length > 0) {
+        isFirstLoad = false;
+        const last = sorted[sorted.length - 1];
+        
+        // Fokus ke posisi terakhir kendaraan dengan zoom 17
+        map.setView([last.latitude, last.longitude], 17);
+        
+        console.log(`📍 Auto-focus ke kendaraan: ${last.latitude.toFixed(6)}, ${last.longitude.toFixed(6)}`);
+    }
+
+    // ---- Fit bounds kalau ada polyline (opsional) ----
     const allLayer = floodLayerGroup.getLayers();
-    if (allLayer.length > 0) {
-        try {
-            const group = L.featureGroup(allLayer);
-            map.fitBounds(group.getBounds().pad(0.15), { maxZoom: 17 });
-        } catch (e) {}
+    if (allLayer.length > 1 && !isFirstLoad) {
+        // Hanya fit kalau ada lebih dari 1 titik dan bukan first load
+        // biar tidak override auto-focus
     }
 
     updateMapStats(dataArray.length, roadEventMarkers.length);
