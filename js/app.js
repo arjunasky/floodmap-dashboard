@@ -63,23 +63,33 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ---- Listener: system status ----
+// ---- Listener: system status ----
     onSystemStatus((status) => {
-        const ind = document.getElementById('espIndicator');
-        if (ind) {
-            ind.innerHTML = status.esp32_online
-                ? '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online'
-                : '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
-        }
-        if (status.last_update) {
-            setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
-        }
-        updateSensorStatus({
-            sensor: status.sensor_status || 'menunggu',
-            imu:    status.imu_status    || 'menunggu',
-            gps:    status.gps_status    || 'menunggu',
-            esp:    status.esp32_online ? 'online' : 'offline'
-        });
+    // Cek ESP32 online (terima boolean atau string "true")
+    const isEspOnline = status.esp32_online === true 
+                     || status.esp32_online === 'true';
+
+    // Update topbar indicator
+    const ind = document.getElementById('espIndicator');
+    if (ind) {
+        ind.innerHTML = isEspOnline
+            ? '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online'
+            : '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
+    }
+
+    // Update last update
+    if (status.last_update) {
+        setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
+    }
+
+    // Update sidebar sensor status
+    updateSensorStatus({
+        sensor: status.sensor_status || 'menunggu',
+        imu:    status.imu_status    || 'menunggu',
+        gps:    status.gps_status    || 'menunggu',
+        esp:    isEspOnline ? 'online' : 'offline'
     });
+});
 
     // ---- Init road events layer setelah map siap ----
     setTimeout(() => {
