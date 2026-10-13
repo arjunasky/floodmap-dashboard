@@ -1,10 +1,5 @@
 // ============================================================
 // UI.JS — Update UI Elements
-// FloodMap Makassar — Sensor Fusion Dashboard
-// ============================================================
-
-// ============================================================
-// UTIL FORMAT
 // ============================================================
 
 function formatTime(ts) {
@@ -29,29 +24,25 @@ function setText(id, val) {
 }
 
 // ============================================================
-// GET LOCATION NAME — dengan fallback
+// LOCATION NAME
 // ============================================================
 function getLocationName(p) {
-    // 1. Cek cache geocoder (dari geocoder.js)
     if (typeof geocodeCache !== 'undefined' && typeof gridKey === 'function') {
         const key = gridKey(p.latitude, p.longitude);
         if (geocodeCache[key]) return geocodeCache[key];
     }
-
-    // 2. Kalau data punya location valid
     if (p.location && p.location !== '-' && p.location !== '' && p.location !== 'Auto') {
         return p.location;
     }
-
-    // 3. Fallback: koordinat
     return `Koordinat ${(p.latitude||0).toFixed(4)}, ${(p.longitude||0).toFixed(4)}`;
 }
 
 // ============================================================
-// UPDATE UI UTAMA
+// UPDATE UI — Stat cards + Tabel
 // ============================================================
+function updateUI(dataArray, options = {}) {
+    const { filterTable = false } = options;
 
-function updateUI(dataArray) {
     if (!dataArray || dataArray.length === 0) {
         ['totalPoints','amanCount','siagaCount','bahayaCount'].forEach(id => {
             const el = document.getElementById(id);
@@ -62,6 +53,7 @@ function updateUI(dataArray) {
         return;
     }
 
+    // Stat cards
     const total = dataArray.length;
     const aman = dataArray.filter(d => d.status === 'aman').length;
     const siaga = dataArray.filter(d => d.status === 'siaga').length;
@@ -72,46 +64,41 @@ function updateUI(dataArray) {
     setText('siagaCount', siaga);
     setText('bahayaCount', bahaya);
 
-    // ---- Table 10 terbaru ----
+    // Tabel
     const tb = document.getElementById('tableBody');
-    if (tb) {
-        const latest = [...dataArray]
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, 10);
+    if (!tb) return;
 
-        tb.innerHTML = latest.map(d => {
-            const st = getStatusLabel(d.status);
-            const loc = getLocationName(d);
-            return `<tr>
-                <td>${formatTime(d.timestamp)}</td>
-                <td>${loc}</td>
-                <td><strong>${d.depth}</strong> cm</td>
-                <td><span class="status-badge ${st.cls}">${st.label}</span></td>
-            </tr>`;
-        }).join('');
+    let tableData = dataArray;
+    if (filterTable) {
+        tableData = dataArray.filter(p =>
+            p.source === 'gps' && (p.satellites || 0) >= 4
+        );
     }
 
-    // ---- Sensor readout ----
-    const last = [...dataArray].sort((a, b) => b.timestamp - a.timestamp)[0];
-    if (last) {
-        const depthEl = document.getElementById('currentDepth');
-        if (depthEl) {
-            depthEl.textContent = last.depth + ' cm';
-            depthEl.style.color = last.status === 'bahaya' ? '#ef4444' :
-                                  last.status === 'siaga'  ? '#f59e0b' : '#22c55e';
-        }
-
-        setText('currentImu', (last.imuZ || 0) + ' g');
-        setText('currentCoord',
-            (last.latitude || 0).toFixed(4) + '°, ' + (last.longitude || 0).toFixed(4) + '°');
-        setText('currentStep', total);
+    if (tableData.length === 0) {
+        tb.innerHTML = '<tr><td colspan="4" class="empty">GPS belum akurat — menunggu data</td></tr>';
+        return;
     }
+
+    const latest = [...tableData]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 10);
+
+    tb.innerHTML = latest.map(d => {
+        const st = getStatusLabel(d.status);
+        const loc = getLocationName(d);
+        return `<tr>
+            <td>${formatTime(d.timestamp)}</td>
+            <td>${loc}</td>
+            <td><strong>${d.depth}</strong> cm</td>
+            <td><span class="status-badge ${st.cls}">${st.label}</span></td>
+        </tr>`;
+    }).join('');
 }
 
 // ============================================================
-// UPDATE HISTORY TABLE
+// HISTORY TABLE
 // ============================================================
-
 function updateHistoryTable(dataArray) {
     const tbody = document.getElementById('historyTableBody');
     if (!tbody) return;
@@ -127,7 +114,6 @@ function updateHistoryTable(dataArray) {
     tbody.innerHTML = sorted.map((d, i) => {
         const st = getStatusLabel(d.status);
         const loc = getLocationName(d);
-
         return `<tr>
             <td>${i+1}</td>
             <td>${formatTime(d.timestamp)}</td>
@@ -144,9 +130,8 @@ function updateHistoryTable(dataArray) {
 }
 
 // ============================================================
-// UPDATE NOTIF
+// NOTIFIKASI
 // ============================================================
-
 function updateNotif(dataArray) {
     const box = document.getElementById('notifBox');
     if (!box) return;
@@ -157,48 +142,31 @@ function updateNotif(dataArray) {
     }
 
     const sorted = [...dataArray].sort((a, b) => b.timestamp - a.timestamp);
-
     const danger = sorted.find(d => d.status === 'bahaya');
     const warning = sorted.find(d => d.status === 'siaga');
     const aman = sorted.find(d => d.status === 'aman');
 
     let html = '';
-
     if (danger) {
         const loc = getLocationName(danger);
-        html += `<div class="notif-item danger">
-            <i class="ti ti-alert-triangle"></i>
-            Bahaya — ${loc} (${danger.depth} cm)
-        </div>`;
+        html += `<div class="notif-item danger"><i class="ti ti-alert-triangle"></i> Bahaya — ${loc} (${danger.depth} cm)</div>`;
     }
-
     if (warning) {
         const loc = getLocationName(warning);
-        html += `<div class="notif-item warning">
-            <i class="ti ti-alert-circle"></i>
-            Siaga — ${loc} (${warning.depth} cm)
-        </div>`;
+        html += `<div class="notif-item warning"><i class="ti ti-alert-circle"></i> Siaga — ${loc} (${warning.depth} cm)</div>`;
     }
-
     if (!html && aman) {
         const loc = getLocationName(aman);
-        html = `<div class="notif-item info">
-            <i class="ti ti-info-circle"></i>
-            Aman — ${loc} (${aman.depth} cm)
-        </div>`;
+        html = `<div class="notif-item info"><i class="ti ti-info-circle"></i> Aman — ${loc} (${aman.depth} cm)</div>`;
     }
-
-    if (!html) {
-        html = '<div class="notif-item info">Sistem normal</div>';
-    }
+    if (!html) html = '<div class="notif-item info">Sistem normal</div>';
 
     box.innerHTML = html;
 }
 
 // ============================================================
-// 🔧 OFF-ROAD STATS — sensor baca genangan di luar jalan
+// OFF-ROAD STATS
 // ============================================================
-
 function updateOffRoadStats(offRoadData) {
     const el = document.getElementById('offRoadStats');
     if (!el) return;
@@ -242,9 +210,8 @@ function updateOffRoadStats(offRoadData) {
 }
 
 // ============================================================
-// SENSOR STATUS (Sidebar)
+// SENSOR STATUS
 // ============================================================
-
 function updateSensorStatus(status) {
     const map = {
         statusSensor: status.sensor,
@@ -276,7 +243,6 @@ function updateSensorStatus(status) {
 // ============================================================
 // CLOCK
 // ============================================================
-
 function updateClock() {
     const now = new Date();
     const el = document.getElementById('clockDisplay');
@@ -292,9 +258,8 @@ setInterval(updateClock, 1000);
 updateClock();
 
 // ============================================================
-// EXPORT GLOBAL
+// EXPORT
 // ============================================================
-
 window.getLocationName = getLocationName;
 window.formatTime = formatTime;
 window.getStatusLabel = getStatusLabel;

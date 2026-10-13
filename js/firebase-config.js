@@ -1,5 +1,5 @@
 // ============================================================
-// FIREBASE CONFIGURATION
+// FIREBASE CONFIG
 // ============================================================
 
 const firebaseConfig = {
@@ -16,11 +16,15 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 // ============================================================
-// DATABASE FUNCTIONS
+// LISTENERS
 // ============================================================
 
 function onFloodPoints(callback) {
   db.ref('flood_points').on('value', (snap) => callback(snap.val() || {}));
+}
+
+function onCurrentReading(callback) {
+  db.ref('current_reading').on('value', (snap) => callback(snap.val() || {}));
 }
 
 function onRoadEvents(callback) {

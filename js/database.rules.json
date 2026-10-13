@@ -3,12 +3,16 @@
     "flood_points": {
       ".read": true,
       ".write": true,
-      ".indexOn": ["timestamp", "segment_id"]
+      ".indexOn": ["timestamp", "segment_id", "status"]
     },
-    "research_data": {
+    "current_reading": {
+      ".read": true,
+      ".write": true
+    },
+    "road_events": {
       ".read": true,
       ".write": true,
-      ".indexOn": ["timestamp", "scenario", "sub"]
+      ".indexOn": ["timestamp", "event_type"]
     },
     "system_status": {
       ".read": true,
