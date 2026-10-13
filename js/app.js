@@ -95,6 +95,60 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 
 function setupNavigation() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const menuToggle = document.getElementById('menuToggle');
+    const sidebarClose = document.getElementById('sidebarClose');
+
+    // ---- Fungsi Open/Close Sidebar ----
+    function openSidebar() {
+        if (sidebar) sidebar.classList.add('open');
+        if (overlay) overlay.classList.add('active');
+        document.body.classList.add('sidebar-open');
+    }
+
+    function closeSidebar() {
+        if (sidebar) sidebar.classList.remove('open');
+        if (overlay) overlay.classList.remove('active');
+        document.body.classList.remove('sidebar-open');
+        setTimeout(() => {
+            if (typeof map !== 'undefined' && map) map.invalidateSize();
+        }, 350);
+    }
+
+    // ---- Toggle button ----
+    if (menuToggle) {
+        menuToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (sidebar && sidebar.classList.contains('open')) {
+                closeSidebar();
+            } else {
+                openSidebar();
+            }
+        });
+    }
+
+    // ---- Tombol close (X) di dalam sidebar ----
+    if (sidebarClose) {
+        sidebarClose.addEventListener('click', closeSidebar);
+    }
+
+    // ---- Klik overlay untuk tutup ----
+    if (overlay) {
+        overlay.addEventListener('click', closeSidebar);
+    }
+
+    // ---- Klik area main wrapper → tutup sidebar (opsional) ----
+    const mainWrapper = document.querySelector('.main-wrapper');
+    if (mainWrapper) {
+        mainWrapper.addEventListener('click', () => {
+            if (sidebar && sidebar.classList.contains('open')) {
+                closeSidebar();
+            }
+        });
+    }
+
+    // ---- Klik nav link → navigate + close sidebar ----
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', function (e) {
             e.preventDefault();
@@ -110,6 +164,10 @@ function setupNavigation() {
             const titleEl = document.getElementById('pageTitle');
             if (titleEl) titleEl.textContent = this.querySelector('span').textContent;
 
+            // 🔧 Auto-close sidebar di mobile
+            closeSidebar();
+
+            // Refresh
             if (page === 'map' && map) {
                 setTimeout(() => map.invalidateSize(), 200);
             }
@@ -120,11 +178,38 @@ function setupNavigation() {
         });
     });
 
-    const toggle = document.getElementById('menuToggle');
-    if (toggle) {
-        toggle.addEventListener('click', () => {
-            document.getElementById('sidebar').classList.toggle('open');
-        });
+    // ---- Handle ESC key → tutup sidebar ----
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && sidebar && sidebar.classList.contains('open')) {
+            closeSidebar();
+        }
+    });
+
+    // ---- Handle swipe gesture (opsional) ----
+    let touchStartX = 0;
+    let touchEndX = 0;
+
+    document.addEventListener('touchstart', (e) => {
+        touchStartX = e.changedTouches[0].screenX;
+    }, { passive: true });
+
+    document.addEventListener('touchend', (e) => {
+        touchEndX = e.changedTouches[0].screenX;
+        handleSwipe();
+    }, { passive: true });
+
+    function handleSwipe() {
+        const swipeDistance = touchEndX - touchStartX;
+
+        // Swipe kanan dari kiri layar → buka sidebar
+        if (touchStartX < 50 && swipeDistance > 80) {
+            openSidebar();
+        }
+
+        // Swipe kiri → tutup sidebar
+        if (swipeDistance < -80 && sidebar && sidebar.classList.contains('open')) {
+            closeSidebar();
+        }
     }
 }
 
