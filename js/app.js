@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupNavigation();
     setupSettings();
     setupMapFilters();
-    setupAdminPanel();      // 🔒 Admin panel tersembunyi
+    setupAdminPanel();
 
     // ---- Listener: flood points ----
     onFloodPoints((data) => {
@@ -63,33 +63,31 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ---- Listener: system status ----
-// ---- Listener: system status ----
     onSystemStatus((status) => {
-    // Cek ESP32 online (terima boolean atau string "true")
-    const isEspOnline = status.esp32_online === true 
-                     || status.esp32_online === 'true';
+        const raw = status.esp32_online;
+        const isEspOnline = raw === true
+                         || raw === 'true'
+                         || raw === 1
+                         || raw === '1';
 
-    // Update topbar indicator
-    const ind = document.getElementById('espIndicator');
-    if (ind) {
-        ind.innerHTML = isEspOnline
-            ? '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online'
-            : '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
-    }
+        const ind = document.getElementById('espIndicator');
+        if (ind) {
+            ind.innerHTML = isEspOnline
+                ? '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online'
+                : '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
+        }
 
-    // Update last update
-    if (status.last_update) {
-        setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
-    }
+        if (status.last_update) {
+            setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
+        }
 
-    // Update sidebar sensor status
-    updateSensorStatus({
-        sensor: status.sensor_status || 'menunggu',
-        imu:    status.imu_status    || 'menunggu',
-        gps:    status.gps_status    || 'menunggu',
-        esp:    isEspOnline ? 'online' : 'offline'
+        updateSensorStatus({
+            sensor: status.sensor_status || 'menunggu',
+            imu:    status.imu_status    || 'menunggu',
+            gps:    status.gps_status    || 'menunggu',
+            esp:    isEspOnline ? 'online' : 'offline'
+        });
     });
-});
 
     // ---- Init road events layer setelah map siap ----
     setTimeout(() => {
@@ -98,6 +96,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 500);
 
     setupExportButtons();
+
+    // ============================================
+    // 🔧 TOMBOL FOCUS KENDARAAN
+    // ============================================
+    const btnFocus = document.getElementById('btnFocusVehicle');
+    if (btnFocus) {
+        btnFocus.addEventListener('click', () => {
+            if (!currentDataArray || currentDataArray.length === 0) {
+                alert('Belum ada data kendaraan');
+                return;
+            }
+            const last = currentDataArray[currentDataArray.length - 1];
+            map.setView([last.latitude, last.longitude], 18);
+            if (vehicleMarker) {
+                vehicleMarker.openPopup();
+            }
+        });
+    }
 });
 
 // ============================================================
@@ -110,7 +126,7 @@ function setupNavigation() {
     const menuToggle = document.getElementById('menuToggle');
     const sidebarClose = document.getElementById('sidebarClose');
 
-    // ---- Fungsi Open/Close Sidebar ----
+    // ---- Open/Close Sidebar ----
     function openSidebar() {
         if (sidebar) sidebar.classList.add('open');
         if (overlay) overlay.classList.add('active');
@@ -121,12 +137,12 @@ function setupNavigation() {
         if (sidebar) sidebar.classList.remove('open');
         if (overlay) overlay.classList.remove('active');
         document.body.classList.remove('sidebar-open');
+
         setTimeout(() => {
             if (typeof map !== 'undefined' && map) map.invalidateSize();
         }, 350);
     }
 
-    // ---- Toggle button ----
     if (menuToggle) {
         menuToggle.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -138,27 +154,15 @@ function setupNavigation() {
         });
     }
 
-    // ---- Tombol close (X) di dalam sidebar ----
     if (sidebarClose) {
         sidebarClose.addEventListener('click', closeSidebar);
     }
 
-    // ---- Klik overlay untuk tutup ----
     if (overlay) {
         overlay.addEventListener('click', closeSidebar);
     }
 
-    // ---- Klik area main wrapper → tutup sidebar (opsional) ----
-    const mainWrapper = document.querySelector('.main-wrapper');
-    if (mainWrapper) {
-        mainWrapper.addEventListener('click', () => {
-            if (sidebar && sidebar.classList.contains('open')) {
-                closeSidebar();
-            }
-        });
-    }
-
-    // ---- Klik nav link → navigate + close sidebar ----
+    // ---- Nav links ----
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', function (e) {
             e.preventDefault();
@@ -174,10 +178,8 @@ function setupNavigation() {
             const titleEl = document.getElementById('pageTitle');
             if (titleEl) titleEl.textContent = this.querySelector('span').textContent;
 
-            // 🔧 Auto-close sidebar di mobile
             closeSidebar();
 
-            // Refresh
             if (page === 'map' && map) {
                 setTimeout(() => map.invalidateSize(), 200);
             }
@@ -188,39 +190,12 @@ function setupNavigation() {
         });
     });
 
-    // ---- Handle ESC key → tutup sidebar ----
+    // ---- ESC key ----
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && sidebar && sidebar.classList.contains('open')) {
             closeSidebar();
         }
     });
-
-    // ---- Handle swipe gesture (opsional) ----
-    let touchStartX = 0;
-    let touchEndX = 0;
-
-    document.addEventListener('touchstart', (e) => {
-        touchStartX = e.changedTouches[0].screenX;
-    }, { passive: true });
-
-    document.addEventListener('touchend', (e) => {
-        touchEndX = e.changedTouches[0].screenX;
-        handleSwipe();
-    }, { passive: true });
-
-    function handleSwipe() {
-        const swipeDistance = touchEndX - touchStartX;
-
-        // Swipe kanan dari kiri layar → buka sidebar
-        if (touchStartX < 50 && swipeDistance > 80) {
-            openSidebar();
-        }
-
-        // Swipe kiri → tutup sidebar
-        if (swipeDistance < -80 && sidebar && sidebar.classList.contains('open')) {
-            closeSidebar();
-        }
-    }
 }
 
 // ============================================================
@@ -251,8 +226,8 @@ function setupSettings() {
 }
 
 // ============================================================
-// 🔒 ADMIN PANEL — HIDDEN ACCESS
-// Akses: Klik 5x pada header "Pengaturan Sistem" ATAU ketik "admin"
+// 🔒 ADMIN PANEL — HIDDEN
+// Akses: Klik 5x header "Pengaturan Sistem" ATAU ketik "admin"
 // ============================================================
 
 let adminUnlocked = false;
@@ -268,9 +243,7 @@ function setupAdminPanel() {
         return;
     }
 
-    // --------------------------------------------------------
-    // METODE 1: Klik 5x cepat pada header "Pengaturan Sistem"
-    // --------------------------------------------------------
+    // Metode 1: Klik 5x pada header
     header.addEventListener('click', () => {
         adminClickCount++;
         clearTimeout(adminClickTimer);
@@ -282,9 +255,7 @@ function setupAdminPanel() {
         }
     });
 
-    // --------------------------------------------------------
-    // METODE 2: Ketik "admin" di keyboard (halaman settings aktif)
-    // --------------------------------------------------------
+    // Metode 2: Ketik "admin"
     let typedBuffer = '';
     document.addEventListener('keydown', (e) => {
         const currentPage = document.querySelector('.page-content.active');
@@ -301,9 +272,6 @@ function setupAdminPanel() {
         }
     });
 
-    // --------------------------------------------------------
-    // UNLOCK / LOCK
-    // --------------------------------------------------------
     function unlockAdmin() {
         if (adminUnlocked) return;
         adminUnlocked = true;
@@ -331,19 +299,13 @@ function setupAdminPanel() {
         if (dot) dot.remove();
     }
 
-    // --------------------------------------------------------
-    // ADMIN BUTTONS
-    // --------------------------------------------------------
-
-    // 1. Reset Tampilan (tidak hapus data)
+    // Button: Reset Tampilan
     const btnResetView = document.getElementById('btnAdminResetView');
     if (btnResetView) {
-        btnResetView.addEventListener('click', () => {
-            resetViewOnly();
-        });
+        btnResetView.addEventListener('click', () => resetViewOnly());
     }
 
-    // 2. Hapus flood_points
+    // Button: Clear Flood
     const btnClearFlood = document.getElementById('btnAdminClearFlood');
     if (btnClearFlood) {
         btnClearFlood.addEventListener('click', () => {
@@ -360,7 +322,7 @@ function setupAdminPanel() {
         });
     }
 
-    // 3. Hapus road_events
+    // Button: Clear Events
     const btnClearEvents = document.getElementById('btnAdminClearEvents');
     if (btnClearEvents) {
         btnClearEvents.addEventListener('click', () => {
@@ -379,11 +341,11 @@ function setupAdminPanel() {
         });
     }
 
-    // 4. Full Reset
+    // Button: Full Reset
     const btnFullReset = document.getElementById('btnAdminFullReset');
     if (btnFullReset) {
         btnFullReset.addEventListener('click', () => {
-            if (!confirm('⚠️⚠️ FULL RESET — Hapus SEMUA data (flood + events)?')) return;
+            if (!confirm('⚠️⚠️ FULL RESET — Hapus SEMUA data?')) return;
             if (!confirm('Yakin? Tidak bisa dikembalikan!')) return;
             if (!confirm('Terakhir kali — lanjutkan?')) return;
 
@@ -400,28 +362,24 @@ function setupAdminPanel() {
         });
     }
 
-    // 5. Lock Panel
+    // Button: Lock
     const btnLock = document.getElementById('btnAdminLock');
     if (btnLock) {
-        btnLock.addEventListener('click', () => {
-            lockAdmin();
-        });
+        btnLock.addEventListener('click', () => lockAdmin());
     }
 }
 
 // ============================================================
-// RESET TAMPILAN (hanya visual, tidak hapus data)
+// RESET TAMPILAN (hanya visual)
 // ============================================================
 
 function resetViewOnly() {
     console.log('🔄 Reset tampilan saja');
 
-    // Reset peta ke posisi awal
     if (typeof map !== 'undefined' && map) {
         map.setView(MAP_CONFIG.center, MAP_CONFIG.zoom);
     }
 
-    // Clear layer visual
     if (typeof floodLayerGroup !== 'undefined' && floodLayerGroup) {
         floodLayerGroup.clearLayers();
     }
@@ -432,7 +390,6 @@ function resetViewOnly() {
         vehicleMarker.setLatLng(MAP_CONFIG.center);
     }
 
-    // Reset cache
     if (typeof segmentPolylines !== 'undefined') {
         segmentPolylines = {};
     }
@@ -440,15 +397,17 @@ function resetViewOnly() {
         roadEventMarkers = [];
     }
 
-    // Reset floating stats
     if (typeof updateMapStats === 'function') {
         updateMapStats(0, 0);
     }
 
-    // Reset notifikasi
     const notif = document.getElementById('notifBox');
     if (notif) {
         notif.innerHTML = '<div class="notif-item info">Tampilan direset</div>';
+    }
+
+    if (typeof isFirstLoad !== 'undefined') {
+        isFirstLoad = true;
     }
 
     console.log('✅ Tampilan reset');
@@ -496,7 +455,6 @@ function updateEventsTable(events) {
 // ============================================================
 
 function setupExportButtons() {
-    // CSV
     const csv = document.getElementById('btnExportEventsCSV');
     if (csv) {
         csv.addEventListener('click', () => {
@@ -515,7 +473,6 @@ function setupExportButtons() {
         });
     }
 
-    // JSON
     const json = document.getElementById('btnExportEventsJSON');
     if (json) {
         json.addEventListener('click', () => {
@@ -524,7 +481,6 @@ function setupExportButtons() {
         });
     }
 
-    // Clear
     const clr = document.getElementById('btnClearEvents');
     if (clr) {
         clr.addEventListener('click', () => {
