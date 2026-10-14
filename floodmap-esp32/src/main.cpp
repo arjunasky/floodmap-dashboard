@@ -131,7 +131,10 @@ WiFiClientSecure secureClient;
 // ============================================================
 // UTIL
 // ============================================================
+// CLASSIFY STATUS — dengan Kering
+// ============================================================
 String classifyStatus(float depth) {
+    if (depth < DRY_THRESHOLD_CM) return "kering";   // 🔧 < 3 cm = kering
     if (depth < 10.0) return "aman";
     if (depth < 20.0) return "siaga";
     return "bahaya";
@@ -585,8 +588,16 @@ void firebaseSendCurrentReading(double lat, double lng, int sats, bool isReal,
 // ============================================================
 // SENSOR LOGS
 // ============================================================
+// ============================================================
+// SENSOR LOGS — SKIP kalau kering (depth < 3cm)
+// ============================================================
 void firebaseSendSensorLog(double lat, double lng, int sats, bool isReal,
                             float depth, String status, bool depthValid) {
+    // 🔧 Skip kalau kering — tidak perlu disimpan ke sensor_logs
+    if (depth < DRY_THRESHOLD_CM) {
+        return;
+    }
+
     float pitch, roll;
     mpuReadTilt(pitch, roll);
 
@@ -622,6 +633,9 @@ void firebaseSendSensorLog(double lat, double lng, int sats, bool isReal,
 bool firebaseSendFloodPoint(double lat, double lng, int sats, bool isReal,
                             float depth, String status, bool depthValid) {
     if (!isReal) return false;
+
+    // 🔧 Skip kalau kering — tidak perlu ke flood_points
+    if (depth < DRY_THRESHOLD_CM) return false;
 
     bool shouldSend = false;
     if (!hasSentFirst) shouldSend = true;
@@ -760,42 +774,50 @@ void setup() {
 }
 
 // ============================================================
-// LOOP
+// LOOP — dengan GPS state caching
 // ============================================================
 void loop() {
     gpsUpdate();
     ultrasonicUpdateFast();
 
-    // Debug log periodik
+    // ============================================================
+    // 🔧 AMBIL STATE GPS SEKALI — pakai di semua blok
+    // ============================================================
+    double lat, lng;
+    int sats;
+    bool isReal;
+    gpsGetPosition(lat, lng, sats, isReal);    // ← Sekali saja per loop
+
+    // Debug log
     static unsigned long lastDebug = 0;
     if (millis() - lastDebug > 5000) {
         lastDebug = millis();
-        Serial.printf("[STATUS] depth=%.1f | imuMag=%.3f | logs=%lu events=%lu | seg=%s\n",
-                      latestDepth, dynamicImuMag, totalSensorLogs, totalEvents,
-                      currentSegment == "" ? "none" : currentSegment.c_str());
+        Serial.printf("[STATUS] depth=%.1f | imuMag=%.3f | GPS=%s sat=%d | logs=%lu events=%lu\n",
+                      latestDepth, dynamicImuMag,
+                      isReal ? "FIX" : "FALLBACK", sats,
+                      totalSensorLogs, totalEvents);
     }
 
-    // MPU event detection (200 Hz)
+    // ============================================================
+    // MPU Event Detection (200 Hz)
+    // ============================================================
     static unsigned long lastMpu = 0;
     if (millis() - lastMpu >= MPU_SAMPLE_MS) {
         lastMpu = millis();
         float peak = 0;
         int event = mpuDetectEvent(peak);
 
-        if (event != 0) {
-            double lat, lng; int sats; bool isReal;
-            gpsGetPosition(lat, lng, sats, isReal);
-
-            if (isReal) {
-                unsigned long delayMs = millis() - firstSpikeTime;
-                String type = (event == 1) ? "pothole" : "speed_bump";
-                float speedKmph = gps.speed.isValid() ? gps.speed.kmph() : 0;
-                firebaseSendRoadEvent(type, lat, lng, peak, peak, delayMs, speedKmph);
-            }
+        if (event != 0 && isReal) {          // ← pakai cached isReal
+            unsigned long delayMs = millis() - firstSpikeTime;
+            String type = (event == 1) ? "pothole" : "speed_bump";
+            float speedKmph = gps.speed.isValid() ? gps.speed.kmph() : 0;
+            firebaseSendRoadEvent(type, lat, lng, peak, peak, delayMs, speedKmph);
         }
     }
 
-    // Sensor log (3 detik)
+    // ============================================================
+    // Sensor Log (3 detik)
+    // ============================================================
     if (millis() - lastSensorLogTime >= SENSOR_LOG_INTERVAL_MS) {
         lastSensorLogTime = millis();
 
@@ -806,17 +828,15 @@ void loop() {
             }
 
             mpuReadDynamic();
-
-            double lat, lng; int sats; bool isReal;
-            gpsGetPosition(lat, lng, sats, isReal);
-
             String status = classifyStatus(depth);
 
             firebaseSendSensorLog(lat, lng, sats, isReal, depth, status, true);
         }
     }
 
-    // Current reading (3 detik)
+    // ============================================================
+    // Current Reading (3 detik)
+    // ============================================================
     static unsigned long lastCR = 0;
     if (millis() - lastCR >= CURRENT_READING_INTERVAL_MS) {
         lastCR = millis();
@@ -828,28 +848,24 @@ void loop() {
             }
 
             mpuReadDynamic();
-
-            double lat, lng; int sats; bool isReal;
-            gpsGetPosition(lat, lng, sats, isReal);
-
             String status = classifyStatus(depth);
 
             unsigned long t0 = millis();
             firebaseSendCurrentReading(lat, lng, sats, isReal, depth, status, true);
             unsigned long dt = millis() - t0;
 
-            Serial.printf("[CR] depth=%.1f | sat=%d | HTTP %lu ms\n", depth, sats, dt);
+            Serial.printf("[CR] depth=%.1f | GPS=%s sat=%d | HTTP %lu ms\n",
+                          depth, isReal ? "FIX" : "FALLBACK", sats, dt);
         }
     }
 
-    // Flood points (6 detik)
+    // ============================================================
+    // Flood Points (6 detik)
+    // ============================================================
     if (millis() - lastSendTime >= SEND_INTERVAL_MS) {
         lastSendTime = millis();
 
         if (WiFi.status() == WL_CONNECTED) {
-            double lat, lng; int sats; bool isReal;
-            gpsGetPosition(lat, lng, sats, isReal);
-
             bool depthSuppressed = eventActive &&
                                    (millis() - eventDetectedAt < EVENT_SUPPRESS_MS);
             float depth = depthSuppressed ? stableDepth : latestDepth;
@@ -858,12 +874,12 @@ void loop() {
 
             mpuReadDynamic();
 
-            if (isReal) {
+            if (isReal) {                    // ← pakai cached isReal
                 updatePolylineSegment(depth, depthValid);
                 firebaseSendFloodPoint(lat, lng, sats, isReal, depth, status, depthValid);
             }
 
-            firebaseSendSystemStatus(isReal);
+            firebaseSendSystemStatus(isReal);   // ← konsisten!
             totalSent++;
         }
     }
