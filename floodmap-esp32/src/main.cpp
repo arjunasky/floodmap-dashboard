@@ -67,6 +67,8 @@
 // --- Deteksi Gerakan ---
 #define MIN_MOVEMENT_M      5.0
 #define MIN_DEPTH_CHANGE    3.0
+// 🔧 SEGMENT BREAK — jarak max antar titik flood
+#define SEGMENT_BREAK_M     40.0
 
 // --- GPS Quality (OPTIMIZED) ---
 #define GPS_MIN_SAT         4       // Minimal 4 satelit
@@ -86,6 +88,11 @@ unsigned long totalEvents = 0;
 unsigned long totalCurrentReadings = 0;
 unsigned long totalSensorLogs = 0;
 String currentSegment = "";
+
+// 🔧 Track lokasi flood terakhir (untuk cek gap 40m)
+double lastFloodLat = 0;
+double lastFloodLng = 0;
+bool hasLastFlood = false;
 
 unsigned long segmentStartTime = 0;
 double lastSentLat = 0, lastSentLng = 0;
@@ -526,20 +533,59 @@ int mpuDetectEvent(float &peak_out) {
 // ============================================================
 // POLYLINE SEGMENT
 // ============================================================
-void updatePolylineSegment(float depth, bool depthValid) {
+// ============================================================
+// POLYLINE SEGMENT — dengan break 40 meter
+// ============================================================
+void updatePolylineSegment(double lat, double lng, float depth, bool depthValid) {
     bool hasFlood = depthValid && (depth >= DRY_THRESHOLD_CM);
 
     if (hasFlood) {
+        // ============================================================
+        // CEK APAKAH PERLU SEGMENT BARU
+        // ============================================================
+        bool needNewSegment = false;
+
         if (currentSegment == "") {
+            // Belum ada segment
+            needNewSegment = true;
+            Serial.println("[SEG] 🆕 Titik flood pertama");
+        } else if (hasLastFlood) {
+            // Hitung jarak dari titik flood terakhir
+            double dist = TinyGPSPlus::distanceBetween(
+                lastFloodLat, lastFloodLng, lat, lng
+            );
+
+            if (dist > SEGMENT_BREAK_M) {
+                needNewSegment = true;
+                Serial.printf("[SEG] 📏 Gap %.1fm > %.0fm — segment baru\n",
+                              dist, SEGMENT_BREAK_M);
+            }
+        }
+
+        // Buat segment baru jika perlu
+        if (needNewSegment) {
+            if (currentSegment != "") {
+                Serial.printf("[SEG] ✂️  Ditutup (gap): %s\n", currentSegment.c_str());
+            }
             currentSegment = "seg_" + String(millis());
             segmentStartTime = millis();
-            Serial.printf("[SEG] Genangan: %s | depth=%.1f\n",
+            Serial.printf("[SEG] 🆕 Segmen: %s | depth=%.1f\n",
                           currentSegment.c_str(), depth);
         }
+
+        // Update posisi flood terakhir
+        lastFloodLat = lat;
+        lastFloodLng = lng;
+        hasLastFlood = true;
+
     } else {
+        // ============================================================
+        // KERING — TUTUP SEGMENT
+        // ============================================================
         if (currentSegment != "") {
-            Serial.printf("[SEG] Berakhir: %s\n", currentSegment.c_str());
+            Serial.printf("[SEG] ✂️  Ditutup (kering): %s\n", currentSegment.c_str());
             currentSegment = "";
+            hasLastFlood = false;
         }
     }
 }
@@ -874,10 +920,10 @@ void loop() {
 
             mpuReadDynamic();
 
-            if (isReal) {                    // ← pakai cached isReal
-                updatePolylineSegment(depth, depthValid);
-                firebaseSendFloodPoint(lat, lng, sats, isReal, depth, status, depthValid);
-            }
+            if (isReal) {
+    updatePolylineSegment(lat, lng, depth, depthValid);    // ← BARU (4 argumen)
+    firebaseSendFloodPoint(lat, lng, sats, isReal, depth, status, depthValid);
+    }
 
             firebaseSendSystemStatus(isReal);   // ← konsisten!
             totalSent++;
