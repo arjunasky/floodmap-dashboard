@@ -18,6 +18,12 @@ let currentFloodData = [];       // Genangan di jalan
 let currentOffRoadData = [];     // Genangan di luar jalan
 let currentEvents = {};          // Road events
 
+// Timers untuk deteksi offline
+let currentReadingTimer = null;
+let deviceStatusTimer = null;
+const READING_TIMEOUT_MS = 5000;    // 5 detik
+const DEVICE_TIMEOUT_MS  = 10000;   // 10 detik
+
 // ============================================================
 // INIT
 // ============================================================
@@ -25,17 +31,15 @@ let currentEvents = {};          // Road events
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 FloodMap Makassar dimulai...');
 
-    // Init map
     initMap();
-
     setupNavigation();
     setupSettings();
     setupMapFilters();
     setupAdminPanel();
-    setupLegendToggle();          // 🔧 Legend collapse/expand
+    setupLegendToggle();
 
     // ============================================================
-    // LISTENER: FLOOD POINTS (untuk peta & tabel)
+    // LISTENER: FLOOD POINTS
     // ============================================================
     onFloodPoints(async (data) => {
         const rawArray = Object.values(data || {});
@@ -55,28 +59,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 roll:       parseFloat(p.roll) || 0,
                 segment_id: p.segment_id || '',
                 depth_valid: p.depth_valid !== false,
-                source:     p.source || 'gps',
+                source:     String(p.source || 'gps').toLowerCase().trim(),
                 satellites: parseInt(p.satellites) || 0
             }))
             .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
 
+        // Debug log sources
+        const sources = [...new Set(allData.map(d => d.source))];
+        console.log('📊 Sources:', sources);
+        if (allData.length > 0) console.log('📊 Sample:', allData[0]);
+
         currentAllData = allData;
 
-        // HANYA GPS real + sat >= 4
-        currentVehicleData = allData.filter(p =>
-            p.source === 'gps' && p.satellites >= 4
-        );
+        // HANYA filter by source (ESP32 sudah filter sendiri)
+        currentVehicleData = allData.filter(p => p.source === 'gps');
 
-        // Genangan: GPS real + sat >= 4 + depth > 0 + segment_id
+        // Genangan: GPS real + depth > 0 + segment_id
         const withFlood = allData.filter(p =>
             p.source === 'gps' &&
-            p.satellites >= 4 &&
             p.depth > 0 &&
             p.segment_id &&
             p.depth_valid !== false
         );
 
+        // Road matching
         if (withFlood.length > 0 && typeof matchToRoad === 'function') {
             const matched = await matchToRoad(withFlood);
             currentFloodData   = matched.filter(p => p.matched);
@@ -86,9 +93,8 @@ document.addEventListener('DOMContentLoaded', () => {
             currentOffRoadData = [];
         }
 
-        console.log(`📊 GPS: ${currentVehicleData.length} | Di jalan: ${currentFloodData.length} | Off-road: ${currentOffRoadData.length}`);
+        console.log(`📊 GPS real: ${currentVehicleData.length} | Flood: ${currentFloodData.length} | Off-road: ${currentOffRoadData.length}`);
 
-        // Update UI
         updateUI(currentAllData, { filterTable: true });
         updateHistoryTable(currentAllData);
         updateNotif(currentAllData);
@@ -98,7 +104,6 @@ document.addEventListener('DOMContentLoaded', () => {
         redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData)
             .catch(err => console.error('Map error:', err));
 
-        // Geocoding async
         if (currentVehicleData.length > 0 && typeof prefetchStreetNames === 'function') {
             prefetchStreetNames(currentVehicleData).then(() => {
                 currentAllData.forEach(p => {
@@ -112,12 +117,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ============================================================
-    // LISTENER: CURRENT READING (sensor real-time 10x/detik)
+    // LISTENER: CURRENT READING
     // ============================================================
     onCurrentReading((reading) => {
-        if (!reading || !reading.depth) {
-            console.log('⚠️ current_reading kosong');
-            return;
+        if (!reading || !reading.depth) return;
+
+        const readingTs = reading.timestamp || 0;
+        if (!window._lastReadingTs || readingTs !== window._lastReadingTs) {
+            window._lastReadingTs = readingTs;
+            window._lastReadingReceivedAt = Date.now();
         }
 
         const depth  = parseFloat(reading.depth) || 0;
@@ -128,7 +136,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = (reading.status || 'aman').toLowerCase();
         const source = reading.source || 'fallback';
 
-        // 1. Kedalaman
         const depthEl = document.getElementById('currentDepth');
         if (depthEl) {
             depthEl.textContent = depth.toFixed(1) + ' cm';
@@ -136,19 +143,20 @@ document.addEventListener('DOMContentLoaded', () => {
                                   status === 'siaga'  ? '#f59e0b' : '#22c55e';
         }
 
-        // 2. Akselerasi Z
         const imuEl = document.getElementById('currentImu');
-        if (imuEl) {
-            imuEl.textContent = imuZ.toFixed(2) + ' g';
-            imuEl.style.color = Math.abs(imuZ) > 0.5 ? '#f59e0b' : '#0f172a';
-        }
+        if (imuEl) imuEl.textContent = imuZ.toFixed(2) + ' g';
 
-        // 3. Koordinat
         const coordEl = document.getElementById('currentCoord');
         if (coordEl) {
             coordEl.textContent = lat.toFixed(6) + '°, ' + lng.toFixed(6) + '°';
             coordEl.style.color = (source === 'gps' && sats >= 4) ? '#22c55e' : '#f59e0b';
         }
+
+        // Reset timer
+        clearTimeout(currentReadingTimer);
+        currentReadingTimer = setTimeout(() => {
+            clearSensorReadout();
+        }, READING_TIMEOUT_MS);
     });
 
     // ============================================================
@@ -167,8 +175,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // LISTENER: SYSTEM STATUS
     // ============================================================
     onSystemStatus((status) => {
-        const raw = status.esp32_online;
-        const isEspOnline = raw === true || raw === 'true' || raw === 1 || raw === '1';
+        const lastUpdate = status.last_update || 0;
+        const now = Date.now();
+
+        if (!window._lastStatusUpdate || lastUpdate !== window._lastStatusUpdate) {
+            window._lastStatusUpdate = lastUpdate;
+            window._lastStatusReceivedAt = now;
+        }
+
+        const timeSinceUpdate = now - (window._lastStatusReceivedAt || 0);
+        const isFresh = timeSinceUpdate < DEVICE_TIMEOUT_MS;
+        const isEspOnline = isFresh && (
+            status.esp32_online === true ||
+            status.esp32_online === 'true' ||
+            status.esp32_online === 1 ||
+            status.esp32_online === '1'
+        );
 
         const ind = document.getElementById('espIndicator');
         if (ind) {
@@ -177,19 +199,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 : '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
         }
 
-        if (status.last_update) {
+        if (status.last_update && isFresh) {
             setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
+        } else {
+            setText('lastUpdate', 'Update: --:--:--');
         }
 
         updateSensorStatus({
-            sensor: status.sensor_status || 'menunggu',
-            imu:    status.imu_status    || 'menunggu',
-            gps:    status.gps_status    || 'menunggu',
+            sensor: isFresh ? (status.sensor_status || 'menunggu') : 'offline',
+            imu:    isFresh ? (status.imu_status    || 'menunggu') : 'offline',
+            gps:    isFresh ? (status.gps_status    || 'menunggu') : 'offline',
             esp:    isEspOnline ? 'online' : 'offline'
         });
+
+        clearTimeout(deviceStatusTimer);
+        deviceStatusTimer = setTimeout(() => {
+            forceOfflineStatus();
+        }, DEVICE_TIMEOUT_MS);
     });
 
-    // Init road events layer
     setTimeout(() => {
         if (typeof initRoadEventLayer === 'function') initRoadEventLayer(map);
         if (typeof listenRoadEvents === 'function') listenRoadEvents();
@@ -197,9 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setupExportButtons();
 
-    // ============================================================
-    // TOMBOL FOCUS KENDARAAN
-    // ============================================================
+    // Tombol focus kendaraan
     const btnFocus = document.getElementById('btnFocusVehicle');
     if (btnFocus) {
         btnFocus.addEventListener('click', () => {
@@ -219,36 +245,66 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================
-// LEGEND TOGGLE — collapse/expand
+// CLEAR SENSOR READOUT
 // ============================================================
+function clearSensorReadout() {
+    console.log('⚠️ Current reading timeout — clear display');
 
+    const depthEl = document.getElementById('currentDepth');
+    if (depthEl) {
+        depthEl.textContent = '-- cm';
+        depthEl.style.color = '#94a3b8';
+    }
+    const imuEl = document.getElementById('currentImu');
+    if (imuEl) imuEl.textContent = '-- g';
+    const coordEl = document.getElementById('currentCoord');
+    if (coordEl) {
+        coordEl.textContent = '--°, --°';
+        coordEl.style.color = '#94a3b8';
+    }
+}
+
+// ============================================================
+// FORCE OFFLINE
+// ============================================================
+function forceOfflineStatus() {
+    console.log('⚠️ Device timeout — set offline');
+
+    const ind = document.getElementById('espIndicator');
+    if (ind) {
+        ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
+    }
+
+    setText('lastUpdate', 'Update: --:--:--');
+
+    updateSensorStatus({
+        sensor: 'offline',
+        imu:    'offline',
+        gps:    'offline',
+        esp:    'offline'
+    });
+
+    clearSensorReadout();
+}
+
+// ============================================================
+// LEGEND TOGGLE
+// ============================================================
 function setupLegendToggle() {
     const legend = document.getElementById('mapLegend');
     const toggle = document.getElementById('legendToggle');
 
-    if (!legend || !toggle) {
-        console.warn('⚠️ Legend elements tidak ditemukan');
-        return;
-    }
+    if (!legend || !toggle) return;
 
     toggle.addEventListener('click', (e) => {
         e.stopPropagation();
         legend.classList.toggle('collapsed');
-
-        const isCollapsed = legend.classList.contains('collapsed');
-        localStorage.setItem('legendCollapsed', isCollapsed);
+        localStorage.setItem('legendCollapsed', legend.classList.contains('collapsed'));
     });
 
-    // Restore state
     const savedState = localStorage.getItem('legendCollapsed');
-    if (savedState === 'true') {
-        legend.classList.add('collapsed');
-    }
-
-    // Auto-collapse di mobile saat pertama load
-    if (window.innerWidth <= 768 && savedState === null) {
-        legend.classList.add('collapsed');
-    }
+    if (savedState === 'true') legend.classList.add('collapsed');
+    if (window.innerWidth <= 768 && savedState === null) legend.classList.add('collapsed');
 
     console.log('✅ Legend toggle ready');
 }
@@ -256,7 +312,6 @@ function setupLegendToggle() {
 // ============================================================
 // NAVIGATION
 // ============================================================
-
 function setupNavigation() {
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('sidebarOverlay');
@@ -321,7 +376,6 @@ function setupNavigation() {
 // ============================================================
 // SETTINGS
 // ============================================================
-
 function setupSettings() {
     const btn = document.getElementById('btnSaveSettings');
     if (!btn) return;
@@ -345,9 +399,8 @@ function setupSettings() {
 }
 
 // ============================================================
-// 🔒 ADMIN PANEL — HIDDEN
+// ADMIN PANEL
 // ============================================================
-
 let adminUnlocked = false;
 let adminClickCount = 0;
 let adminClickTimer = null;
@@ -445,7 +498,6 @@ function setupAdminPanel() {
 // ============================================================
 // RESET TAMPILAN
 // ============================================================
-
 function resetViewOnly() {
     if (typeof map !== 'undefined' && map) map.setView(MAP_CONFIG.center, MAP_CONFIG.zoom);
     if (typeof floodLayerGroup !== 'undefined' && floodLayerGroup) floodLayerGroup.clearLayers();
@@ -465,7 +517,6 @@ function resetViewOnly() {
 // ============================================================
 // EVENTS TABLE
 // ============================================================
-
 function updateEventsTable(events) {
     const tb = document.getElementById('eventsTableBody');
     if (!tb) return;
@@ -499,9 +550,8 @@ function updateEventsTable(events) {
 }
 
 // ============================================================
-// EXPORT BUTTONS
+// EXPORT
 // ============================================================
-
 function setupExportButtons() {
     const csv = document.getElementById('btnExportEventsCSV');
     if (csv) {
@@ -545,7 +595,6 @@ function downloadFile(content, filename, type) {
 // ============================================================
 // EXPORT GLOBAL
 // ============================================================
-
 window.APP = APP;
 window.initMap = initMap;
 window.resetViewOnly = resetViewOnly;

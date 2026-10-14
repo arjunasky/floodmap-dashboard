@@ -43,6 +43,10 @@ function clearRoadEvents() {
   return db.ref('road_events').remove();
 }
 
+function clearCurrentReading() {
+  return db.ref('current_reading').remove();
+}
+
 // ============================================================
 // CONNECTION STATUS
 // ============================================================

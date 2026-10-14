@@ -53,7 +53,6 @@ function updateUI(dataArray, options = {}) {
         return;
     }
 
-    // Stat cards
     const total = dataArray.length;
     const aman = dataArray.filter(d => d.status === 'aman').length;
     const siaga = dataArray.filter(d => d.status === 'siaga').length;
@@ -64,15 +63,12 @@ function updateUI(dataArray, options = {}) {
     setText('siagaCount', siaga);
     setText('bahayaCount', bahaya);
 
-    // Tabel
     const tb = document.getElementById('tableBody');
     if (!tb) return;
 
     let tableData = dataArray;
     if (filterTable) {
-        tableData = dataArray.filter(p =>
-            p.source === 'gps' && (p.satellites || 0) >= 4
-        );
+        tableData = dataArray.filter(p => p.source === 'gps');
     }
 
     if (tableData.length === 0) {
@@ -210,7 +206,7 @@ function updateOffRoadStats(offRoadData) {
 }
 
 // ============================================================
-// SENSOR STATUS
+// SENSOR STATUS (Sidebar)
 // ============================================================
 function updateSensorStatus(status) {
     const map = {
