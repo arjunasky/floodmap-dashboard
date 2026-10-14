@@ -84,11 +84,14 @@ function updateUI(dataArray, options = {}) {
 
     let tableData = dataArray;
     if (filterTable) {
-        tableData = dataArray.filter(p => p.source === 'gps');
+        // 🔧 HANYA GPS real + depth >= 3 cm (tidak tampil kering)
+        tableData = dataArray.filter(p => 
+            p.source === 'gps' && (p.depth || 0) >= 3
+        );
     }
-
+    
     if (tableData.length === 0) {
-        tb.innerHTML = '<tr><td colspan="4" class="empty">GPS belum akurat — menunggu data</td></tr>';
+        tb.innerHTML = '<tr><td colspan="4" class="empty">Tidak ada genangan</td></tr>';
         return;
     }
 
