@@ -171,57 +171,108 @@ document.addEventListener('DOMContentLoaded', () => {
         updateEventsTable(currentEvents);
     });
 
+// ============================================================
+// LISTENER: SYSTEM STATUS — dengan deteksi cache vs live
+// ============================================================
+let deviceStatusTimer = null;
+const DEVICE_TIMEOUT_MS = 10000;   // 10 detik
+
+onSystemStatus((status) => {
+    const lastUpdate = status.last_update || 0;
+    const now = Date.now();
+
     // ============================================================
-    // LISTENER: SYSTEM STATUS
+    // DETEKSI CACHE vs LIVE UPDATE
     // ============================================================
-    onSystemStatus((status) => {
-        const lastUpdate = status.last_update || 0;
-        const now = Date.now();
+    // Saat load pertama, Firebase kirim data terakhir (cache).
+    // Kita anggap "live" HANYA kalau last_update BERUBAH
+    // dari nilai sebelumnya.
 
-        if (!window._lastStatusUpdate || lastUpdate !== window._lastStatusUpdate) {
-            window._lastStatusUpdate = lastUpdate;
-            window._lastStatusReceivedAt = now;
-        }
+    const isFirstLoad = window._lastStatusUpdate === undefined;
+    const isSameValue = window._lastStatusUpdate === lastUpdate;
+    const isNewValue  = !isFirstLoad && lastUpdate !== window._lastStatusUpdate;
 
-        const timeSinceUpdate = now - (window._lastStatusReceivedAt || 0);
-        const isFresh = timeSinceUpdate < DEVICE_TIMEOUT_MS;
-        const isEspOnline = isFresh && (
-            status.esp32_online === true ||
-            status.esp32_online === 'true' ||
-            status.esp32_online === 1 ||
-            status.esp32_online === '1'
-        );
+    if (isNewValue) {
+        // Ada update baru → ini LIVE update
+        window._lastStatusReceivedAt = now;
+        window._hasLiveUpdate = true;
+    } else if (isFirstLoad) {
+        // Pertama kali load → anggap belum live
+        window._hasLiveUpdate = false;
+    }
+    // Kalau isSameValue → tidak reset timer (biar timeout)
 
-        const ind = document.getElementById('espIndicator');
-        if (ind) {
-            ind.innerHTML = isEspOnline
-                ? '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online'
-                : '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
-        }
+    window._lastStatusUpdate = lastUpdate;
 
-        if (status.last_update && isFresh) {
-            setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
+    // ============================================================
+    // TENTUKAN STATUS
+    // ============================================================
+    const timeSinceLive = now - (window._lastStatusReceivedAt || 0);
+    const isFresh = window._hasLiveUpdate && timeSinceLive < DEVICE_TIMEOUT_MS;
+    const isEspOnline = isFresh && (
+        status.esp32_online === true ||
+        status.esp32_online === 'true' ||
+        status.esp32_online === 1 ||
+        status.esp32_online === '1'
+    );
+
+    // ============================================================
+    // UPDATE UI
+    // ============================================================
+    const ind = document.getElementById('espIndicator');
+
+    if (ind) {
+        if (!window._hasLiveUpdate) {
+            // Belum pernah dapat live update → menunggu
+            ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#94a3b8;"></i> ESP32 Menunggu...';
+        } else if (isEspOnline) {
+            ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online';
         } else {
-            setText('lastUpdate', 'Update: --:--:--');
+            ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
         }
+    }
 
+    if (isFresh && status.last_update) {
+        setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
+    } else {
+        setText('lastUpdate', 'Update: --:--:--');
+    }
+
+    // Sensor status
+    if (!window._hasLiveUpdate) {
+        // Belum live → semua "menunggu"
         updateSensorStatus({
-            sensor: isFresh ? (status.sensor_status || 'menunggu') : 'offline',
-            imu:    isFresh ? (status.imu_status    || 'menunggu') : 'offline',
-            gps:    isFresh ? (status.gps_status    || 'menunggu') : 'offline',
+            sensor: 'menunggu',
+            imu:    'menunggu',
+            gps:    'menunggu',
+            esp:    'menunggu'
+        });
+    } else if (isFresh) {
+        // Live & fresh → tampilkan status asli
+        updateSensorStatus({
+            sensor: status.sensor_status || 'menunggu',
+            imu:    status.imu_status    || 'menunggu',
+            gps:    status.gps_status    || 'menunggu',
             esp:    isEspOnline ? 'online' : 'offline'
         });
+    } else {
+        // Live sudah expired → offline
+        updateSensorStatus({
+            sensor: 'offline',
+            imu:    'offline',
+            gps:    'offline',
+            esp:    'offline'
+        });
+    }
 
-        clearTimeout(deviceStatusTimer);
-        deviceStatusTimer = setTimeout(() => {
-            forceOfflineStatus();
-        }, DEVICE_TIMEOUT_MS);
-    });
-
-    setTimeout(() => {
-        if (typeof initRoadEventLayer === 'function') initRoadEventLayer(map);
-        if (typeof listenRoadEvents === 'function') listenRoadEvents();
-    }, 500);
+    // ============================================================
+    // TIMER OFFLINE
+    // ============================================================
+    clearTimeout(deviceStatusTimer);
+    deviceStatusTimer = setTimeout(() => {
+        forceOfflineStatus();
+    }, DEVICE_TIMEOUT_MS);
+});
 
     setupExportButtons();
 

@@ -229,6 +229,9 @@ function updateSensorStatus(status) {
         } else if (val === 'offline') {
             el.textContent = 'Offline';
             el.className = 'badge danger';
+        } else if (val === 'menunggu') {
+            el.textContent = 'Menunggu';
+            el.className = 'badge';           // abu-abu
         } else {
             el.textContent = 'Menunggu';
             el.className = 'badge';
