@@ -191,11 +191,26 @@
 
             <div class="bottom-grid">
                 <div class="panel">
-                    <div class="panel-header"><i class="ti ti-list"></i> Data Terbaru <span class="panel-sub">(10 data)</span></div>
-                    <div class="panel-body table-wrap">
+                    <div class="panel-header">
+                        <i class="ti ti-map-pin"></i> Titik Genangan
+                        <span class="panel-sub" id="segmentsCount">(0 titik flood)</span>
+                    </div>
+                    <div class="panel-body table-wrap" style="max-height:340px; overflow-y:auto;">
                         <table>
-                            <thead><tr><th>Waktu</th><th>Lokasi</th><th>Kedalaman</th><th>Status</th></tr></thead>
-                            <tbody id="tableBody"><tr><td colspan="4" class="empty">Belum ada data</td></tr></tbody>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Waktu</th>
+                                    <th>Lokasi</th>
+                                    <th>Depth Rata</th>
+                                    <th>Status</th>
+                                    <th>Panjang</th>
+                                    <th>Detail</th>
+                                </tr>
+                            </thead>
+                            <tbody id="floodSegmentsBody">
+                                <tr><td colspan="7" class="empty">Belum ada genangan</td></tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>

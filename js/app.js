@@ -1,7 +1,6 @@
 // ============================================================
 // APP.JS — Main Application Logic
-// FloodMap Makassar — Sensor Fusion Dashboard + Sensor Logs
-// + DRY_THRESHOLD Integration (3cm)
+// FloodMap Makassar — 1 Segment = 1 Titik Flood
 // ============================================================
 
 const APP = {
@@ -13,7 +12,7 @@ const APP = {
 // ============================================================
 // KONSTANTA GLOBAL
 // ============================================================
-const DRY_THRESHOLD = 3.0;   // 🔧 < 3 cm = KERING (noise)
+const DRY_THRESHOLD = 3.0;   // < 3 cm = KERING
 
 // ============================================================
 // VARIABEL GLOBAL
@@ -22,6 +21,7 @@ let currentAllData = [];
 let currentVehicleData = [];
 let currentFloodData = [];
 let currentOffRoadData = [];
+let currentFloodSegments = [];   // 🔧 1 segment = 1 titik flood
 let currentEvents = {};
 
 // Sensor Logs
@@ -40,11 +40,9 @@ let firebaseConnected = true;
 // ============================================================
 // INIT
 // ============================================================
-
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 FloodMap Makassar dimulai...');
 
-    // Cek koneksi Firebase
     if (typeof db !== 'undefined') {
         db.ref('.info/connected').on('value', (snap) => {
             firebaseConnected = snap.val() === true;
@@ -87,38 +85,40 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
 
-        const sources = [...new Set(allData.map(d => d.source))];
-        console.log('📊 Sources:', sources);
-
         currentAllData = allData;
         currentVehicleData = allData.filter(p => p.source === 'gps');
 
-        // 🔧 FILTER: HANYA depth >= 3 cm yang dianggap genangan
+        // 🔧 FILTER: HANYA depth >= 3 cm
         const withFlood = allData.filter(p =>
             p.source === 'gps' &&
-            p.depth >= DRY_THRESHOLD &&      // ← 3 cm minimum
+            p.depth >= DRY_THRESHOLD &&
             p.segment_id &&
             p.depth_valid !== false
         );
 
-        console.log(`💧 Genangan (depth >= ${DRY_THRESHOLD}cm): ${withFlood.length}`);
-
         if (withFlood.length > 0 && typeof matchToRoad === 'function') {
             const matched = await matchToRoad(withFlood);
-            currentFloodData   = matched.filter(p => p.matched);
-            currentOffRoadData = matched.filter(p => !p.matched);
+            currentFloodData   = matched.matched ? matched.matched.filter(p => p.matched) : withFlood;
+            currentOffRoadData = matched.matched ? matched.matched.filter(p => !p.matched) : [];
         } else {
             currentFloodData = [];
             currentOffRoadData = [];
         }
 
-        console.log(`📊 GPS: ${currentVehicleData.length} | Flood: ${currentFloodData.length} | Off-road: ${currentOffRoadData.length}`);
+        // 🔧 GROUP SEGMENT — 1 segment = 1 titik flood
+        currentFloodSegments = groupFloodSegments(currentFloodData);
 
-        updateUI(currentAllData, { filterTable: true });
+        console.log(`📊 GPS: ${currentVehicleData.length} | Raw: ${currentFloodData.length} | Segmen: ${currentFloodSegments.length}`);
+
+        updateUI(currentAllData, { 
+            filterTable: true, 
+            segmentCount: currentFloodSegments.length 
+        });
         updateHistoryTable(currentAllData);
         updateNotif(currentAllData);
         updateCharts(currentFloodData);
         updateOffRoadStats(currentOffRoadData);
+        updateFloodSegmentsTable(currentFloodSegments);
 
         redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData)
             .catch(err => console.error('Map error:', err));
@@ -129,7 +129,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const name = geocodeCache[gridKey(p.latitude, p.longitude)];
                     if (name) p.location = name;
                 });
-                updateUI(currentAllData, { filterTable: true });
+                updateUI(currentAllData, { 
+                    filterTable: true, 
+                    segmentCount: currentFloodSegments.length 
+                });
                 updateHistoryTable(currentAllData);
             });
         }
@@ -159,7 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (depthEl) {
             depthEl.textContent = depth.toFixed(1) + ' cm';
             depthEl.style.color = status === 'bahaya' ? '#ef4444' :
-                                  status === 'siaga'  ? '#f59e0b' : '#22c55e';
+                                  status === 'siaga'  ? '#f59e0b' : 
+                                  status === 'kering' ? '#64748b' : '#22c55e';
         }
 
         const imuEl = document.getElementById('currentImu');
@@ -272,7 +276,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, DEVICE_TIMEOUT_MS);
     });
 
-    // Init road events layer
     setTimeout(() => {
         if (typeof initRoadEventLayer === 'function') initRoadEventLayer(map);
         if (typeof listenRoadEvents === 'function') listenRoadEvents();
@@ -280,7 +283,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setupExportButtons();
 
-    // Tombol focus kendaraan
     const btnFocus = document.getElementById('btnFocusVehicle');
     if (btnFocus) {
         btnFocus.addEventListener('click', () => {
@@ -298,6 +300,85 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// ============================================================
+// GROUP FLOOD POINTS → SEGMENTS (1 segment = 1 titik flood)
+// ============================================================
+function groupFloodSegments(floodData) {
+    if (!floodData || floodData.length === 0) return [];
+
+    const grouped = {};
+    floodData.forEach(p => {
+        const sid = p.segment_id || 'unknown';
+        if (!grouped[sid]) {
+            grouped[sid] = {
+                segment_id: sid,
+                points: [],
+                minLat: p.latitude,
+                maxLat: p.latitude,
+                minLng: p.longitude,
+                maxLng: p.longitude,
+                sumDepth: 0,
+                maxDepth: 0,
+                firstTimestamp: p.timestamp,
+                lastTimestamp: p.timestamp,
+                source: p.source
+            };
+        }
+
+        const g = grouped[sid];
+        g.points.push(p);
+        g.sumDepth += p.depth || 0;
+        if (p.depth > g.maxDepth) g.maxDepth = p.depth;
+        if (p.latitude < g.minLat) g.minLat = p.latitude;
+        if (p.latitude > g.maxLat) g.maxLat = p.latitude;
+        if (p.longitude < g.minLng) g.minLng = p.longitude;
+        if (p.longitude > g.maxLng) g.maxLng = p.longitude;
+        if (p.timestamp < g.firstTimestamp) g.firstTimestamp = p.timestamp;
+        if (p.timestamp > g.lastTimestamp) g.lastTimestamp = p.timestamp;
+    });
+
+    return Object.values(grouped).map(g => {
+        const avgDepth = g.sumDepth / g.points.length;
+        const category = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
+        const centerLat = (g.minLat + g.maxLat) / 2;
+        const centerLng = (g.minLng + g.maxLng) / 2;
+
+        let lengthM = 0;
+        for (let i = 1; i < g.points.length; i++) {
+            const a = g.points[i - 1];
+            const b = g.points[i];
+            lengthM += haversine(a.latitude, a.longitude, b.latitude, b.longitude);
+        }
+
+        return {
+            segment_id: g.segment_id,
+            pointCount: g.points.length,
+            avgDepth: Math.round(avgDepth * 10) / 10,
+            maxDepth: Math.round(g.maxDepth * 10) / 10,
+            category: category,
+            centerLat: centerLat,
+            centerLng: centerLng,
+            firstTimestamp: g.firstTimestamp,
+            lastTimestamp: g.lastTimestamp,
+            durationSec: Math.round((g.lastTimestamp - g.firstTimestamp) / 1000),
+            lengthM: Math.round(lengthM * 10) / 10,
+            source: g.source,
+            points: g.points
+        };
+    }).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+}
+
+function haversine(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLng/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+}
 
 // ============================================================
 // CLEAR SENSOR READOUT
@@ -356,7 +437,7 @@ function setupLegendToggle() {
 }
 
 // ============================================================
-// SENSOR LOGS — HANDLERS
+// SENSOR LOGS HANDLERS
 // ============================================================
 function setupSensorLogsHandlers() {
     const searchInput = document.getElementById('logsSearch');
@@ -399,7 +480,7 @@ function setupSensorLogsHandlers() {
 }
 
 // ============================================================
-// SENSOR LOGS — UI
+// SENSOR LOGS UI
 // ============================================================
 function updateSensorLogsUI(logsData) {
     currentLogsData = logsData;
@@ -512,7 +593,7 @@ function updateLogsStats() {
 }
 
 // ============================================================
-// SENSOR LOGS — EXPORT
+// SENSOR LOGS EXPORT
 // ============================================================
 function exportLogsCSV() {
     const data = filteredLogsData;

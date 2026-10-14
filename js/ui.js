@@ -1,28 +1,36 @@
 // ============================================================
 // UI.JS — Update UI Elements
-// FloodMap Makassar
 // ============================================================
 
-// ============================================================
-// FORMAT TIME — WITA (UTC+8) 24 Jam
-// ============================================================
 function formatTime(ts) {
     if (!ts) return '--:--:--';
     
-    // Convert ke WITA (Asia/Makassar, UTC+8)
     const d = new Date(parseFloat(ts));
-    
-    // Force timezone WITA
     const options = {
         timeZone: 'Asia/Makassar',
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        hour12: false   // 24 jam
+        hour12: false
     };
+    return new Intl.DateTimeFormat('id-ID', options).format(d);
+}
+
+function formatDateTime(ts) {
+    if (!ts) return '--';
     
-    const formatter = new Intl.DateTimeFormat('id-ID', options);
-    return formatter.format(d);
+    const d = new Date(parseFloat(ts));
+    const options = {
+        timeZone: 'Asia/Makassar',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    };
+    return new Intl.DateTimeFormat('id-ID', options).format(d);
 }
 
 function getStatusLabel(status) {
@@ -30,7 +38,7 @@ function getStatusLabel(status) {
     if (s === 'bahaya') return { label: 'Bahaya', cls: 'bahaya' };
     if (s === 'siaga')  return { label: 'Siaga',  cls: 'siaga' };
     if (s === 'suppressed') return { label: 'Diabaikan', cls: 'suppressed' };
-    if (s === 'kering') return { label: 'Kering', cls: 'kering' };   // 🔧
+    if (s === 'kering') return { label: 'Kering', cls: 'kering' };
     return { label: 'Aman', cls: 'aman' };
 }
 
@@ -57,7 +65,7 @@ function getLocationName(p) {
 // UPDATE UI — Stat cards + Tabel
 // ============================================================
 function updateUI(dataArray, options = {}) {
-    const { filterTable = false } = options;
+    const { filterTable = false, segmentCount = null } = options;
 
     if (!dataArray || dataArray.length === 0) {
         ['totalPoints','amanCount','siagaCount','bahayaCount'].forEach(id => {
@@ -69,27 +77,34 @@ function updateUI(dataArray, options = {}) {
         return;
     }
 
-    const total = dataArray.length;
-    const aman = dataArray.filter(d => d.status === 'aman').length;
-    const siaga = dataArray.filter(d => d.status === 'siaga').length;
-    const bahaya = dataArray.filter(d => d.status === 'bahaya').length;
-
-    setText('totalPoints', total);
-    setText('amanCount', aman);
-    setText('siagaCount', siaga);
-    setText('bahayaCount', bahaya);
+    // 🔧 Pakai segmentCount kalau dikirim (jumlah genangan unik)
+    if (segmentCount !== null && typeof currentFloodSegments !== 'undefined') {
+        setText('totalPoints', segmentCount);
+        const segAman = currentFloodSegments.filter(s => s.category === 'aman').length;
+        const segSiaga = currentFloodSegments.filter(s => s.category === 'siaga').length;
+        const segBahaya = currentFloodSegments.filter(s => s.category === 'bahaya').length;
+        setText('amanCount', segAman);
+        setText('siagaCount', segSiaga);
+        setText('bahayaCount', segBahaya);
+    } else {
+        const total = dataArray.length;
+        const aman = dataArray.filter(d => d.status === 'aman').length;
+        const siaga = dataArray.filter(d => d.status === 'siaga').length;
+        const bahaya = dataArray.filter(d => d.status === 'bahaya').length;
+        setText('totalPoints', total);
+        setText('amanCount', aman);
+        setText('siagaCount', siaga);
+        setText('bahayaCount', bahaya);
+    }
 
     const tb = document.getElementById('tableBody');
     if (!tb) return;
 
     let tableData = dataArray;
     if (filterTable) {
-        // 🔧 HANYA GPS real + depth >= 3 cm (tidak tampil kering)
-        tableData = dataArray.filter(p => 
-            p.source === 'gps' && (p.depth || 0) >= 3
-        );
+        tableData = dataArray.filter(p => p.source === 'gps' && (p.depth || 0) >= 3);
     }
-    
+
     if (tableData.length === 0) {
         tb.innerHTML = '<tr><td colspan="4" class="empty">Tidak ada genangan</td></tr>';
         return;
@@ -107,6 +122,40 @@ function updateUI(dataArray, options = {}) {
             <td>${loc}</td>
             <td><strong>${d.depth}</strong> cm</td>
             <td><span class="status-badge ${st.cls}">${st.label}</span></td>
+        </tr>`;
+    }).join('');
+}
+
+// ============================================================
+// FLOOD SEGMENTS TABLE — 1 baris per segment
+// ============================================================
+function updateFloodSegmentsTable(segments) {
+    const tb = document.getElementById('floodSegmentsBody');
+    if (!tb) return;
+
+    const countEl = document.getElementById('segmentsCount');
+    if (countEl) countEl.textContent = `(${segments.length} titik flood)`;
+
+    if (!segments || segments.length === 0) {
+        tb.innerHTML = '<tr><td colspan="7" class="empty">Belum ada genangan terdeteksi</td></tr>';
+        return;
+    }
+
+    tb.innerHTML = segments.slice(0, 20).map((seg, i) => {
+        const st = getStatusLabel(seg.category);
+        const loc = getLocationName({
+            latitude: seg.centerLat,
+            longitude: seg.centerLng
+        });
+
+        return `<tr>
+            <td>${i + 1}</td>
+            <td>${formatTime(seg.lastTimestamp)}</td>
+            <td>${loc}</td>
+            <td><strong>${seg.avgDepth}</strong> cm</td>
+            <td><span class="status-badge ${st.cls}">${st.label}</span></td>
+            <td>${seg.lengthM} m</td>
+            <td><span class="sub-badge">${seg.pointCount} titik</span></td>
         </tr>`;
     }).join('');
 }
@@ -225,7 +274,7 @@ function updateOffRoadStats(offRoadData) {
 }
 
 // ============================================================
-// SENSOR STATUS (Sidebar)
+// SENSOR STATUS
 // ============================================================
 function updateSensorStatus(status) {
     const map = {
@@ -256,13 +305,12 @@ function updateSensorStatus(status) {
 }
 
 // ============================================================
-// CLOCK — WITA (UTC+8) 24 Jam
+// CLOCK — WITA
 // ============================================================
 function updateClock() {
     const el = document.getElementById('clockDisplay');
     if (!el) return;
-    
-    const now = new Date();
+
     const options = {
         timeZone: 'Asia/Makassar',
         hour: '2-digit',
@@ -270,42 +318,20 @@ function updateClock() {
         second: '2-digit',
         hour12: false
     };
-    
-    el.textContent = new Intl.DateTimeFormat('id-ID', options).format(now);
+    el.textContent = new Intl.DateTimeFormat('id-ID', options).format(new Date());
 }
 
 setInterval(updateClock, 1000);
 updateClock();
 
 // ============================================================
-// FORMAT DATETIME LENGKAP — WITA 24 Jam
-// ============================================================
-function formatDateTime(ts) {
-    if (!ts) return '--';
-    
-    const d = new Date(parseFloat(ts));
-    const options = {
-        timeZone: 'Asia/Makassar',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    };
-    
-    return new Intl.DateTimeFormat('id-ID', options).format(d);
-}
-
-// Export
-window.formatDateTime = formatDateTime;
-// ============================================================
 // EXPORT GLOBAL
 // ============================================================
 window.getLocationName = getLocationName;
 window.formatTime = formatTime;
+window.formatDateTime = formatDateTime;
 window.getStatusLabel = getStatusLabel;
 window.updateOffRoadStats = updateOffRoadStats;
+window.updateFloodSegmentsTable = updateFloodSegmentsTable;
 
 console.log('✅ ui.js loaded');

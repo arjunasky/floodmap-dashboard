@@ -1,15 +1,14 @@
 // ============================================================
-// MAP.JS — Leaflet OSM Visualization
-// Polyline mengikuti bentuk jalan + lebar dinamis sesuai zoom
+// MAP.JS — Leaflet OpenStreetMap
+// Polyline mengikuti jalan + lebar dinamis + 1 marker per segment
 // ============================================================
 
-// State
 let map = null;
 let vehicleMarker = null;
 let floodLayerGroup = null;
 let roadEventLayerGroup = null;
 let vehicleLayerGroup = null;
-let segmentPolylines = {};      // key: segment_id, value: { layer, widthMeters, lat }
+let segmentPolylines = {};
 let roadEventMarkers = [];
 let totalDistance = 0;
 let isFirstLoad = true;
@@ -27,19 +26,18 @@ const MAP_CONFIG = {
 
 const ROAD_CONFIG = {
     MAX_SNAP_DISTANCE: 30,
-    MAX_GAP_BREAK:     50,
+    MAX_GAP_BREAK:     40,
     MIN_POINTS_SEGMENT: 2
 };
 
-// 🔧 LEBAR JALAN (meter) sesuai kategori kedalaman
 const ROAD_WIDTH_M = {
-    aman:   4.0,    // ~2 jalur sempit
-    siaga:  5.0,    // jalan sedang
-    bahaya: 6.5     // jalan besar
+    aman:   4.0,
+    siaga:  5.0,
+    bahaya: 6.5
 };
 
 // ============================================================
-// UTIL — Konversi meter ke pixel di zoom tertentu
+// UTIL — meter to pixel
 // ============================================================
 function metersPerPixel(lat, zoom) {
     return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
@@ -99,7 +97,6 @@ function initMap() {
 
     L.control.scale({ imperial: false, metric: true }).addTo(map);
 
-    // 🔧 ZOOM LISTENER — update lebar polyline tiap zoom berubah
     map.on('zoomend', () => {
         updatePolylineWeights();
     });
@@ -142,14 +139,12 @@ function smoothPath(points) {
 }
 
 // ============================================================
-// 4. ROAD MATCHING — OSRM dengan GEOMETRY
+// 4. ROAD MATCHING — OSRM
 // ============================================================
 const roadMatchCache = {};
 
 async function matchToRoad(points) {
-    if (points.length === 0) {
-        return { matched: [], geometry: [] };
-    }
+    if (points.length === 0) return { matched: [], geometry: [] };
 
     const batches = [];
     for (let i = 0; i < points.length; i += 90) {
@@ -182,7 +177,6 @@ async function matchToRoad(points) {
             if (!res.ok) throw new Error(`OSRM ${res.status}`);
             const data = await res.json();
 
-            // Extract tracepoint info (untuk match status)
             const tracepoints = data.tracepoints || [];
             const matched = [];
 
@@ -196,7 +190,6 @@ async function matchToRoad(points) {
                 });
             });
 
-            // 🔧 Extract geometry (koordinat mengikuti jalan)
             const geometry = [];
             if (data.matchings && data.matchings.length > 0) {
                 data.matchings.forEach(m => {
@@ -222,7 +215,7 @@ async function matchToRoad(points) {
 }
 
 // ============================================================
-// 5. BUILD SEGMENTS — dengan filter DRY_THRESHOLD
+// 5. BUILD SEGMENTS
 // ============================================================
 function buildPolylineSegments(points) {
     if (points.length < 2) return [];
@@ -259,7 +252,7 @@ function buildPolylineSegments(points) {
 }
 
 // ============================================================
-// 6. REDRAW MAP — Polyline mengikuti geometri jalan
+// 6. REDRAW MAP
 // ============================================================
 async function redrawMapFromData(allData, floodData, offRoadData) {
     if (!map || !floodLayerGroup) return;
@@ -267,19 +260,14 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     if (!floodData) floodData = [];
     if (!offRoadData) offRoadData = [];
 
-    // 🔧 FILTER: hanya depth >= 3 cm
     const DRY = (typeof DRY_THRESHOLD !== 'undefined') ? DRY_THRESHOLD : 3.0;
-    const beforeFilter = floodData.length;
     floodData = floodData.filter(p => (p.depth || 0) >= DRY);
-    if (beforeFilter > floodData.length) {
-        console.log(`🚫 DRY filter: ${beforeFilter - floodData.length} titik dibuang`);
-    }
 
     floodLayerGroup.clearLayers();
     segmentPolylines = {};
     totalDistance = 0;
 
-    // ---- RENDER POLYLINE per segment_id ----
+    // ---- RENDER POLYLINE ----
     if (floodData.length >= 2) {
         const groupBySeg = {};
         floodData.forEach(p => {
@@ -290,46 +278,37 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
 
         for (const [sid, points] of Object.entries(groupBySeg)) {
             points.sort((a, b) => a.timestamp - b.timestamp);
-
             const segments = buildPolylineSegments(points);
 
             for (let idx = 0; idx < segments.length; idx++) {
                 const seg = segments[idx];
                 if (seg.length < 2) continue;
 
-                // Hitung avg depth untuk kategori
                 const avgDepth = seg.reduce((s, p) => s + (p.depth || 0), 0) / seg.length;
                 const category = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
                 const color = MAP_CONFIG.colors[category];
                 const widthMeters = ROAD_WIDTH_M[category];
 
-                // 🔧 ROAD MATCHING — pakai geometri jalan asli
                 let path = seg.map(p => [p.latitude, p.longitude]);
 
                 try {
                     const matchResult = await matchToRoad(seg);
                     if (matchResult.geometry && matchResult.geometry.length >= 2) {
                         path = matchResult.geometry.map(g => [g.lat, g.lng]);
-                        console.log(`🛣️  Segment ${sid}: pakai geometri OSRM (${path.length} titik)`);
                     } else {
-                        // Fallback: smooth path GPS raw
                         path = smoothPath(path);
                     }
                 } catch (e) {
                     path = smoothPath(path);
                 }
 
-                // Hitung panjang
                 let segLength = 0;
                 for (let i = 1; i < path.length; i++) {
                     segLength += haversine(path[i-1][0], path[i-1][1], path[i][0], path[i][1]);
                 }
                 totalDistance += segLength;
 
-                // Center lat untuk kalkulasi lebar
                 const centerLat = path[Math.floor(path.length / 2)][0];
-
-                // 🔧 HITUNG WEIGHT sesuai zoom saat ini
                 const currentZoom = map.getZoom();
                 const weight = getWeightPixels(centerLat, currentZoom, widthMeters);
 
@@ -345,17 +324,14 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
                 polyline.bindPopup(`
                     <div style="font-family:Inter; font-size:12px; min-width:180px;">
                         <strong style="color:${color}; font-size:13px;">● ${category.toUpperCase()}</strong><br>
-                        <strong>Segmen:</strong> ${sid}${segments.length > 1 ? ` (part ${idx+1})` : ''}<br>
+                        <strong>Segmen:</strong> ${sid}<br>
                         <strong>Panjang:</strong> ${segLength.toFixed(1)} m<br>
-                        <strong>Lebar visual:</strong> ${widthMeters.toFixed(1)} m<br>
-                        <strong>Rata-rata depth:</strong> ${avgDepth.toFixed(1)} cm<br>
+                        <strong>Depth rata:</strong> ${avgDepth.toFixed(1)} cm<br>
                         <strong>Titik GPS:</strong> ${seg.length}
                     </div>
                 `);
 
                 floodLayerGroup.addLayer(polyline);
-
-                // Simpan meta untuk zoom update
                 segmentPolylines[`${sid}_${idx}`] = {
                     layer: polyline,
                     widthMeters: widthMeters,
@@ -364,6 +340,52 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
             }
         }
     }
+
+    // ---- 🔧 MARKER PER SEGMENT (1 segment = 1 titik) ----
+    const segmentMarkers = {};
+    floodData.forEach(p => {
+        const sid = p.segment_id || 'unknown';
+        if (segmentMarkers[sid]) return;
+
+        const segPoints = floodData.filter(x => x.segment_id === sid);
+        const avgDepth = segPoints.reduce((s, x) => s + (x.depth || 0), 0) / segPoints.length;
+        const maxDepth = Math.max(...segPoints.map(x => x.depth || 0));
+        const cat = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
+        const color = MAP_CONFIG.colors[cat];
+
+        const centerLat = segPoints.reduce((s, x) => s + x.latitude, 0) / segPoints.length;
+        const centerLng = segPoints.reduce((s, x) => s + x.longitude, 0) / segPoints.length;
+
+        const icon = L.divIcon({
+            className: 'segment-marker',
+            html: `<div style="
+                background: ${color};
+                width: 28px; height: 28px;
+                border-radius: 50%;
+                border: 3px solid #fff;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                display: flex; align-items: center; justify-content: center;
+                font-size: 11px; font-weight: 700; color: #fff;
+            ">${segPoints.length}</div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        });
+
+        const marker = L.marker([centerLat, centerLng], { icon });
+
+        marker.bindPopup(`
+            <div style="font-family:Inter; font-size:12px; min-width:180px;">
+                <strong style="color:${color}; font-size:13px;">● ${cat.toUpperCase()}</strong><br>
+                <strong>Segmen:</strong> ${sid}<br>
+                <strong>Titik GPS:</strong> ${segPoints.length}<br>
+                <strong>Depth rata:</strong> ${avgDepth.toFixed(1)} cm<br>
+                <strong>Depth max:</strong> ${maxDepth.toFixed(1)} cm
+            </div>
+        `);
+
+        floodLayerGroup.addLayer(marker);
+        segmentMarkers[sid] = marker;
+    });
 
     // ---- VEHICLE MARKER ----
     if (allData && allData.length > 0) {
@@ -378,7 +400,6 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         if (isFirstLoad) {
             isFirstLoad = false;
             map.setView([last.latitude, last.longitude], 17);
-            console.log(`📍 Auto-focus: ${last.latitude.toFixed(6)}, ${last.longitude.toFixed(6)}`);
         }
     }
 
@@ -386,24 +407,16 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
 }
 
 // ============================================================
-// 7. UPDATE WIDTH saat zoom berubah
+// 7. UPDATE WIDTH saat zoom
 // ============================================================
 function updatePolylineWeights() {
     if (!map) return;
-
     const currentZoom = map.getZoom();
-    let updated = 0;
-
     Object.values(segmentPolylines).forEach(item => {
         if (!item.layer || !item.widthMeters) return;
         const newWeight = getWeightPixels(item.lat, currentZoom, item.widthMeters);
         item.layer.setStyle({ weight: newWeight });
-        updated++;
     });
-
-    if (updated > 0) {
-        console.log(`🔧 Updated ${updated} polyline weights (zoom ${currentZoom})`);
-    }
 }
 
 // ============================================================
@@ -468,8 +481,6 @@ function renderRoadEvents(events) {
         roadEventLayerGroup.addLayer(marker);
         roadEventMarkers.push({ marker, data: ev, type: ev.event_type });
     });
-
-    console.log(`📌 ${roadEventMarkers.length} event dirender`);
 }
 
 function listenRoadEvents() {
@@ -546,4 +557,4 @@ function setupMapFilters() {
     }
 }
 
-console.log('✅ map.js loaded (road-matched + zoom-adaptive width)');
+console.log('✅ map.js loaded');
