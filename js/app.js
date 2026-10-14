@@ -1,6 +1,7 @@
 // ============================================================
 // APP.JS — Main Application Logic
 // FloodMap Makassar — Sensor Fusion Dashboard + Sensor Logs
+// + DRY_THRESHOLD Integration (3cm)
 // ============================================================
 
 const APP = {
@@ -8,6 +9,11 @@ const APP = {
     thresholdBahaya: 20,
     thresholdImu: 0.30
 };
+
+// ============================================================
+// KONSTANTA GLOBAL
+// ============================================================
+const DRY_THRESHOLD = 3.0;   // 🔧 < 3 cm = KERING (noise)
 
 // ============================================================
 // VARIABEL GLOBAL
@@ -52,7 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupMapFilters();
     setupAdminPanel();
     setupLegendToggle();
-    setupSensorLogsHandlers();      // 🔧 Sensor Logs
+    setupSensorLogsHandlers();
 
     // ============================================================
     // LISTENER: FLOOD POINTS
@@ -83,17 +89,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const sources = [...new Set(allData.map(d => d.source))];
         console.log('📊 Sources:', sources);
-        if (allData.length > 0) console.log('📊 Sample:', allData[0]);
 
         currentAllData = allData;
         currentVehicleData = allData.filter(p => p.source === 'gps');
 
+        // 🔧 FILTER: HANYA depth >= 3 cm yang dianggap genangan
         const withFlood = allData.filter(p =>
             p.source === 'gps' &&
-            p.depth > 0 &&
+            p.depth >= DRY_THRESHOLD &&      // ← 3 cm minimum
             p.segment_id &&
             p.depth_valid !== false
         );
+
+        console.log(`💧 Genangan (depth >= ${DRY_THRESHOLD}cm): ${withFlood.length}`);
 
         if (withFlood.length > 0 && typeof matchToRoad === 'function') {
             const matched = await matchToRoad(withFlood);
@@ -295,8 +303,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // CLEAR SENSOR READOUT
 // ============================================================
 function clearSensorReadout() {
-    console.log('⚠️ Current reading timeout — clear display');
-
     const depthEl = document.getElementById('currentDepth');
     if (depthEl) {
         depthEl.textContent = '-- cm';
@@ -315,8 +321,6 @@ function clearSensorReadout() {
 // FORCE OFFLINE
 // ============================================================
 function forceOfflineStatus() {
-    console.log('⚠️ Device timeout — set offline');
-
     const ind = document.getElementById('espIndicator');
     if (ind) {
         ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
@@ -349,15 +353,12 @@ function setupLegendToggle() {
     const savedState = localStorage.getItem('legendCollapsed');
     if (savedState === 'true') legend.classList.add('collapsed');
     if (window.innerWidth <= 768 && savedState === null) legend.classList.add('collapsed');
-
-    console.log('✅ Legend toggle ready');
 }
 
 // ============================================================
 // SENSOR LOGS — HANDLERS
 // ============================================================
 function setupSensorLogsHandlers() {
-    // Search
     const searchInput = document.getElementById('logsSearch');
     if (searchInput) {
         searchInput.addEventListener('input', () => {
@@ -366,15 +367,12 @@ function setupSensorLogsHandlers() {
         });
     }
 
-    // Filter status
     const filterStatus = document.getElementById('logsFilterStatus');
     if (filterStatus) filterStatus.addEventListener('change', applyLogsFilter);
 
-    // Filter source
     const filterSource = document.getElementById('logsFilterSource');
     if (filterSource) filterSource.addEventListener('change', applyLogsFilter);
 
-    // Refresh
     const btnRefresh = document.getElementById('btnRefreshLogs');
     if (btnRefresh) {
         btnRefresh.addEventListener('click', () => {
@@ -390,7 +388,6 @@ function setupSensorLogsHandlers() {
         });
     }
 
-    // Export buttons
     const btnCSV = document.getElementById('btnExportLogsCSV');
     if (btnCSV) btnCSV.addEventListener('click', () => exportLogsCSV());
 
@@ -399,12 +396,10 @@ function setupSensorLogsHandlers() {
 
     const btnExcel = document.getElementById('btnExportLogsExcel');
     if (btnExcel) btnExcel.addEventListener('click', () => exportLogsExcel());
-
-    console.log('✅ Sensor logs handlers ready');
 }
 
 // ============================================================
-// SENSOR LOGS — UI UPDATE
+// SENSOR LOGS — UI
 // ============================================================
 function updateSensorLogsUI(logsData) {
     currentLogsData = logsData;
@@ -421,9 +416,7 @@ function applyLogsFilter() {
         .map(log => ({
             ...log,
             _depth: parseFloat(log.depth) || 0,
-            _timestamp: parseFloat(log.timestamp) || 0,
-            _lat: parseFloat(log.latitude) || 0,
-            _lng: parseFloat(log.longitude) || 0
+            _timestamp: parseFloat(log.timestamp) || 0
         }))
         .filter(log => {
             if (filterStatus !== 'all' && (log.status || '').toLowerCase() !== filterStatus) return false;
@@ -519,14 +512,11 @@ function updateLogsStats() {
 }
 
 // ============================================================
-// SENSOR LOGS — EXPORT CSV
+// SENSOR LOGS — EXPORT
 // ============================================================
 function exportLogsCSV() {
     const data = filteredLogsData;
-    if (data.length === 0) {
-        alert('Tidak ada data untuk diexport');
-        return;
-    }
+    if (data.length === 0) { alert('Tidak ada data untuk diexport'); return; }
 
     const headers = [
         'No', 'Timestamp', 'Waktu', 'Depth_cm', 'Status', 'Raw_cm',
@@ -538,60 +528,31 @@ function exportLogsCSV() {
 
     data.forEach((log, i) => {
         const row = [
-            i + 1,
-            log.timestamp || '',
-            formatTime(log.timestamp),
-            parseFloat(log.depth) || 0,
-            log.status || '',
-            parseFloat(log.depth_raw) || 0,
-            log.latitude || '',
-            log.longitude || '',
-            log.satellites || 0,
-            log.hdop || '',
-            log.source || '',
-            log.imuZ || '',
-            log.imuMag || '',
-            log.pitch || '',
-            log.roll || '',
-            log.segment_id || '',
+            i + 1, log.timestamp || '', formatTime(log.timestamp),
+            parseFloat(log.depth) || 0, log.status || '',
+            parseFloat(log.depth_raw) || 0, log.latitude || '',
+            log.longitude || '', log.satellites || 0, log.hdop || '',
+            log.source || '', log.imuZ || '', log.imuMag || '',
+            log.pitch || '', log.roll || '', log.segment_id || '',
             log.device || ''
         ];
         csv += row.map(v => `"${v}"`).join(',') + '\n';
     });
 
     downloadFile(csv, `sensor_logs_${formatDateForFile()}.csv`, 'text/csv;charset=utf-8;');
-    console.log(`✅ CSV exported: ${data.length} entri`);
 }
 
-// ============================================================
-// SENSOR LOGS — EXPORT JSON
-// ============================================================
 function exportLogsJSON() {
     const data = filteredLogsData;
-    if (data.length === 0) {
-        alert('Tidak ada data untuk diexport');
-        return;
-    }
-
-    const json = JSON.stringify(data, null, 2);
-    downloadFile(json, `sensor_logs_${formatDateForFile()}.json`, 'application/json');
-    console.log(`✅ JSON exported: ${data.length} entri`);
+    if (data.length === 0) { alert('Tidak ada data untuk diexport'); return; }
+    downloadFile(JSON.stringify(data, null, 2), `sensor_logs_${formatDateForFile()}.json`, 'application/json');
 }
 
-// ============================================================
-// SENSOR LOGS — EXPORT EXCEL
-// ============================================================
 function exportLogsExcel() {
     const data = filteredLogsData;
-    if (data.length === 0) {
-        alert('Tidak ada data untuk diexport');
-        return;
-    }
+    if (data.length === 0) { alert('Tidak ada data untuk diexport'); return; }
 
-    let html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel">';
-    html += '<head><meta charset="UTF-8"></head><body>';
-    html += '<table border="1">';
-
+    let html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table border="1">';
     html += '<tr style="background:#0f172a; color:#fff; font-weight:bold;">';
     ['No', 'Waktu', 'Depth (cm)', 'Status', 'Raw (cm)', 'Latitude', 'Longitude',
      'Satellites', 'HDOP', 'Source', 'IMU Z', 'IMU Mag', 'Pitch', 'Roll', 'Segment', 'Device']
@@ -620,9 +581,7 @@ function exportLogsExcel() {
     });
 
     html += '</table></body></html>';
-
     downloadFile(html, `sensor_logs_${formatDateForFile()}.xls`, 'application/vnd.ms-excel');
-    console.log(`✅ Excel exported: ${data.length} entri`);
 }
 
 function formatDateForFile() {
@@ -711,15 +670,11 @@ function setupSettings() {
         const b = parseInt(document.getElementById('thresholdBahaya').value);
         const imu = parseFloat(document.getElementById('thresholdImu').value);
 
-        if (s >= b) {
-            alert('⚠️ Nilai Siaga harus lebih kecil dari Bahaya!');
-            return;
-        }
+        if (s >= b) { alert('⚠️ Nilai Siaga harus lebih kecil dari Bahaya!'); return; }
 
         APP.thresholdSiaga = s;
         APP.thresholdBahaya = b;
         APP.thresholdImu = imu;
-
         alert('✅ Pengaturan disimpan!');
     });
 }
@@ -780,10 +735,7 @@ function setupAdminPanel() {
         btnClearFlood.addEventListener('click', () => {
             if (!confirm('⚠️ Hapus SEMUA flood_points?')) return;
             if (!confirm('Yakin?')) return;
-            clearFloodPoints().then(() => {
-                alert('✅ Dihapus');
-                resetViewOnly();
-            });
+            clearFloodPoints().then(() => { alert('✅ Dihapus'); resetViewOnly(); });
         });
     }
 
@@ -876,7 +828,7 @@ function updateEventsTable(events) {
 }
 
 // ============================================================
-// EXPORT BUTTONS (untuk Event Jalan)
+// EXPORT BUTTONS (Events)
 // ============================================================
 function setupExportButtons() {
     const csv = document.getElementById('btnExportEventsCSV');
@@ -926,5 +878,6 @@ window.initMap = initMap;
 window.resetViewOnly = resetViewOnly;
 window.updateSensorLogsUI = updateSensorLogsUI;
 window.applyLogsFilter = applyLogsFilter;
+window.DRY_THRESHOLD = DRY_THRESHOLD;
 
 console.log('✅ app.js loaded');

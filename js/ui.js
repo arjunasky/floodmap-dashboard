@@ -16,6 +16,7 @@ function getStatusLabel(status) {
     if (s === 'bahaya') return { label: 'Bahaya', cls: 'bahaya' };
     if (s === 'siaga')  return { label: 'Siaga',  cls: 'siaga' };
     if (s === 'suppressed') return { label: 'Diabaikan', cls: 'suppressed' };
+    if (s === 'kering') return { label: 'Kering', cls: 'kering' };   // 🔧
     return { label: 'Aman', cls: 'aman' };
 }
 
