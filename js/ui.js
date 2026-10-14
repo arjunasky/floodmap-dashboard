@@ -3,12 +3,26 @@
 // FloodMap Makassar
 // ============================================================
 
+// ============================================================
+// FORMAT TIME — WITA (UTC+8) 24 Jam
+// ============================================================
 function formatTime(ts) {
     if (!ts) return '--:--:--';
-    const d = new Date(ts);
-    return String(d.getHours()).padStart(2,'0') + ':' +
-           String(d.getMinutes()).padStart(2,'0') + ':' +
-           String(d.getSeconds()).padStart(2,'0');
+    
+    // Convert ke WITA (Asia/Makassar, UTC+8)
+    const d = new Date(parseFloat(ts));
+    
+    // Force timezone WITA
+    const options = {
+        timeZone: 'Asia/Makassar',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false   // 24 jam
+    };
+    
+    const formatter = new Intl.DateTimeFormat('id-ID', options);
+    return formatter.format(d);
 }
 
 function getStatusLabel(status) {
@@ -239,22 +253,50 @@ function updateSensorStatus(status) {
 }
 
 // ============================================================
-// CLOCK
+// CLOCK — WITA (UTC+8) 24 Jam
 // ============================================================
 function updateClock() {
-    const now = new Date();
     const el = document.getElementById('clockDisplay');
-    if (el) {
-        el.textContent =
-            String(now.getHours()).padStart(2,'0') + ':' +
-            String(now.getMinutes()).padStart(2,'0') + ':' +
-            String(now.getSeconds()).padStart(2,'0');
-    }
+    if (!el) return;
+    
+    const now = new Date();
+    const options = {
+        timeZone: 'Asia/Makassar',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    };
+    
+    el.textContent = new Intl.DateTimeFormat('id-ID', options).format(now);
 }
 
 setInterval(updateClock, 1000);
 updateClock();
 
+// ============================================================
+// FORMAT DATETIME LENGKAP — WITA 24 Jam
+// ============================================================
+function formatDateTime(ts) {
+    if (!ts) return '--';
+    
+    const d = new Date(parseFloat(ts));
+    const options = {
+        timeZone: 'Asia/Makassar',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    };
+    
+    return new Intl.DateTimeFormat('id-ID', options).format(d);
+}
+
+// Export
+window.formatDateTime = formatDateTime;
 // ============================================================
 // EXPORT GLOBAL
 // ============================================================

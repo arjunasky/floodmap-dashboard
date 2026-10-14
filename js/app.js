@@ -562,7 +562,7 @@ function exportLogsExcel() {
     data.forEach((log, i) => {
         html += '<tr>';
         html += `<td>${i + 1}</td>`;
-        html += `<td>${new Date(parseFloat(log.timestamp)).toLocaleString('id-ID')}</td>`;
+        html += `<td>${formatDateTime(log.timestamp)}</td>`;
         html += `<td>${parseFloat(log.depth) || 0}</td>`;
         html += `<td>${log.status || ''}</td>`;
         html += `<td>${parseFloat(log.depth_raw) || 0}</td>`;

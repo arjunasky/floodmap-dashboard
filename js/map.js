@@ -308,7 +308,7 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         dot.bindPopup(`
             <div style="font-family:Inter; font-size:11px;">
                 <strong>Depth:</strong> ${p.depth} cm<br>
-                <strong>Waktu:</strong> ${new Date(p.timestamp).toLocaleTimeString('id-ID')}
+                <strong>Waktu:</strong> ${formatTime(p.timestamp)}
             </div>
         `);
         floodLayerGroup.addLayer(dot);
@@ -392,7 +392,7 @@ function renderRoadEvents(events) {
                 <table style="width:100%; font-size:11px;">
                     <tr><td><strong>Kekuatan:</strong></td><td>${(parseFloat(ev.magnitude_g)||0).toFixed(2)} g</td></tr>
                     <tr><td><strong>Delay 2ban:</strong></td><td>${ev.delay_ms || '-'} ms</td></tr>
-                    <tr><td><strong>Waktu:</strong></td><td>${new Date(ev.timestamp).toLocaleString('id-ID')}</td></tr>
+                    <tr><td><strong>Waktu:</strong></td><td>${formatTime(ev.timestamp)}</td></tr>
                 </table>
             </div>
         `);
