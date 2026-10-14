@@ -21,8 +21,11 @@ let currentEvents = {};          // Road events
 // Timers untuk deteksi offline
 let currentReadingTimer = null;
 let deviceStatusTimer = null;
-const READING_TIMEOUT_MS = 5000;    // 5 detik
-const DEVICE_TIMEOUT_MS  = 10000;   // 10 detik
+const READING_TIMEOUT_MS = 8000;    // 8 detik
+const DEVICE_TIMEOUT_MS  = 20000;   // 20 detik
+
+// Firebase connection state
+let firebaseConnected = true;
 
 // ============================================================
 // INIT
@@ -30,6 +33,14 @@ const DEVICE_TIMEOUT_MS  = 10000;   // 10 detik
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 FloodMap Makassar dimulai...');
+
+    // Cek koneksi Firebase (untuk guard offline detection)
+    if (typeof db !== 'undefined') {
+        db.ref('.info/connected').on('value', (snap) => {
+            firebaseConnected = snap.val() === true;
+            console.log('🔥 Firebase connection:', firebaseConnected);
+        });
+    }
 
     initMap();
     setupNavigation();
@@ -72,7 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         currentAllData = allData;
 
-        // HANYA filter by source (ESP32 sudah filter sendiri)
+        // HANYA filter by source
         currentVehicleData = allData.filter(p => p.source === 'gps');
 
         // Genangan: GPS real + depth > 0 + segment_id
@@ -136,6 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = (reading.status || 'aman').toLowerCase();
         const source = reading.source || 'fallback';
 
+        // Kedalaman
         const depthEl = document.getElementById('currentDepth');
         if (depthEl) {
             depthEl.textContent = depth.toFixed(1) + ' cm';
@@ -143,9 +155,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                   status === 'siaga'  ? '#f59e0b' : '#22c55e';
         }
 
+        // IMU
         const imuEl = document.getElementById('currentImu');
         if (imuEl) imuEl.textContent = imuZ.toFixed(2) + ' g';
 
+        // Koordinat
         const coordEl = document.getElementById('currentCoord');
         if (coordEl) {
             coordEl.textContent = lat.toFixed(6) + '°, ' + lng.toFixed(6) + '°';
@@ -155,7 +169,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset timer
         clearTimeout(currentReadingTimer);
         currentReadingTimer = setTimeout(() => {
-            clearSensorReadout();
+            if (firebaseConnected) {
+                clearSensorReadout();
+            }
         }, READING_TIMEOUT_MS);
     });
 
@@ -171,108 +187,112 @@ document.addEventListener('DOMContentLoaded', () => {
         updateEventsTable(currentEvents);
     });
 
-// ============================================================
-// LISTENER: SYSTEM STATUS — dengan deteksi cache vs live
-// ============================================================
-let deviceStatusTimer = null;
-const DEVICE_TIMEOUT_MS = 10000;   // 10 detik
-
-onSystemStatus((status) => {
-    const lastUpdate = status.last_update || 0;
-    const now = Date.now();
-
     // ============================================================
-    // DETEKSI CACHE vs LIVE UPDATE
+    // LISTENER: SYSTEM STATUS
     // ============================================================
-    // Saat load pertama, Firebase kirim data terakhir (cache).
-    // Kita anggap "live" HANYA kalau last_update BERUBAH
-    // dari nilai sebelumnya.
+    onSystemStatus((status) => {
+        const lastUpdate = status.last_update || 0;
+        const now = Date.now();
 
-    const isFirstLoad = window._lastStatusUpdate === undefined;
-    const isSameValue = window._lastStatusUpdate === lastUpdate;
-    const isNewValue  = !isFirstLoad && lastUpdate !== window._lastStatusUpdate;
+        // ============================================================
+        // DETEKSI CACHE vs LIVE
+        // ============================================================
+        const isFirstLoad = window._lastStatusUpdate === undefined;
+        const isNewValue  = !isFirstLoad && lastUpdate !== window._lastStatusUpdate;
 
-    if (isNewValue) {
-        // Ada update baru → ini LIVE update
-        window._lastStatusReceivedAt = now;
-        window._hasLiveUpdate = true;
-    } else if (isFirstLoad) {
-        // Pertama kali load → anggap belum live
-        window._hasLiveUpdate = false;
-    }
-    // Kalau isSameValue → tidak reset timer (biar timeout)
-
-    window._lastStatusUpdate = lastUpdate;
-
-    // ============================================================
-    // TENTUKAN STATUS
-    // ============================================================
-    const timeSinceLive = now - (window._lastStatusReceivedAt || 0);
-    const isFresh = window._hasLiveUpdate && timeSinceLive < DEVICE_TIMEOUT_MS;
-    const isEspOnline = isFresh && (
-        status.esp32_online === true ||
-        status.esp32_online === 'true' ||
-        status.esp32_online === 1 ||
-        status.esp32_online === '1'
-    );
-
-    // ============================================================
-    // UPDATE UI
-    // ============================================================
-    const ind = document.getElementById('espIndicator');
-
-    if (ind) {
-        if (!window._hasLiveUpdate) {
-            // Belum pernah dapat live update → menunggu
-            ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#94a3b8;"></i> ESP32 Menunggu...';
-        } else if (isEspOnline) {
-            ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online';
-        } else {
-            ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
+        if (isNewValue) {
+            window._lastStatusReceivedAt = now;
+            window._hasLiveUpdate = true;
+        } else if (isFirstLoad) {
+            window._hasLiveUpdate = false;
         }
-    }
 
-    if (isFresh && status.last_update) {
-        setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
-    } else {
-        setText('lastUpdate', 'Update: --:--:--');
-    }
+        window._lastStatusUpdate = lastUpdate;
 
-    // Sensor status
-    if (!window._hasLiveUpdate) {
-        // Belum live → semua "menunggu"
-        updateSensorStatus({
-            sensor: 'menunggu',
-            imu:    'menunggu',
-            gps:    'menunggu',
-            esp:    'menunggu'
-        });
-    } else if (isFresh) {
-        // Live & fresh → tampilkan status asli
-        updateSensorStatus({
-            sensor: status.sensor_status || 'menunggu',
-            imu:    status.imu_status    || 'menunggu',
-            gps:    status.gps_status    || 'menunggu',
-            esp:    isEspOnline ? 'online' : 'offline'
-        });
-    } else {
-        // Live sudah expired → offline
-        updateSensorStatus({
-            sensor: 'offline',
-            imu:    'offline',
-            gps:    'offline',
-            esp:    'offline'
-        });
-    }
+        // ============================================================
+        // HITUNG FRESHNESS
+        // ============================================================
+        const timeSinceLive = now - (window._lastStatusReceivedAt || 0);
+        const isFresh = window._hasLiveUpdate && timeSinceLive < DEVICE_TIMEOUT_MS;
 
-    // ============================================================
-    // TIMER OFFLINE
-    // ============================================================
-    clearTimeout(deviceStatusTimer);
-    deviceStatusTimer = setTimeout(() => {
-        forceOfflineStatus();
-    }, DEVICE_TIMEOUT_MS);
-});
+        const isEspOnline = isFresh && (
+            status.esp32_online === true ||
+            status.esp32_online === 'true' ||
+            status.esp32_online === 1 ||
+            status.esp32_online === '1'
+        );
+
+        // ============================================================
+        // UPDATE TOPBAR
+        // ============================================================
+        const ind = document.getElementById('espIndicator');
+        if (ind) {
+            if (!firebaseConnected) {
+                ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#f59e0b;"></i> Firebase Terputus';
+            } else if (!window._hasLiveUpdate) {
+                ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#94a3b8;"></i> ESP32 Menunggu...';
+            } else if (isEspOnline) {
+                ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#22c55e;"></i> ESP32 Online';
+            } else {
+                ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
+            }
+        }
+
+        if (isFresh && status.last_update) {
+            setText('lastUpdate', 'Update: ' + formatTime(status.last_update));
+        } else {
+            setText('lastUpdate', 'Update: --:--:--');
+        }
+
+        // ============================================================
+        // UPDATE SENSOR STATUS
+        // ============================================================
+        if (!firebaseConnected) {
+            updateSensorStatus({
+                sensor: 'menunggu',
+                imu:    'menunggu',
+                gps:    'menunggu',
+                esp:    'menunggu'
+            });
+        } else if (!window._hasLiveUpdate) {
+            updateSensorStatus({
+                sensor: 'menunggu',
+                imu:    'menunggu',
+                gps:    'menunggu',
+                esp:    'menunggu'
+            });
+        } else if (isFresh) {
+            updateSensorStatus({
+                sensor: status.sensor_status || 'menunggu',
+                imu:    status.imu_status    || 'menunggu',
+                gps:    status.gps_status    || 'menunggu',
+                esp:    isEspOnline ? 'online' : 'offline'
+            });
+        } else {
+            updateSensorStatus({
+                sensor: 'offline',
+                imu:    'offline',
+                gps:    'offline',
+                esp:    'offline'
+            });
+        }
+
+        // ============================================================
+        // TIMER OFFLINE
+        // ============================================================
+        clearTimeout(deviceStatusTimer);
+        deviceStatusTimer = setTimeout(() => {
+            if (firebaseConnected) {
+                forceOfflineStatus();
+            }
+        }, DEVICE_TIMEOUT_MS);
+    });
+
+    // Init road events layer
+    setTimeout(() => {
+        if (typeof initRoadEventLayer === 'function') initRoadEventLayer(map);
+        if (typeof listenRoadEvents === 'function') listenRoadEvents();
+    }, 500);
 
     setupExportButtons();
 
