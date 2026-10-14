@@ -1690,3 +1690,74 @@ table tr:last-child td {
         gap: 8px;
     }
 }
+
+/* ============================================================
+   SENSOR LOGS TABLE
+   ============================================================ */
+   #logsTable {
+    font-size: 11px;
+    min-width: 1100px;
+}
+
+#logsTable th {
+    background: #f1f5f9;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 8px 10px;
+    border-bottom: 2px solid #cbd5e1;
+}
+
+#logsTable td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+#logsTable tbody tr:hover {
+    background: #f8fafc;
+}
+
+/* Input filter di action bar */
+.action-bar-compact input.setting-input,
+.action-bar-compact select.setting-input {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    transition: all 0.15s;
+}
+
+.action-bar-compact input.setting-input:focus,
+.action-bar-compact select.setting-input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    outline: none;
+}
+
+/* Spin animation untuk refresh button */
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.ti-spin {
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+}
+
+/* Responsive — mobile */
+@media (max-width: 768px) {
+    #logsTable {
+        font-size: 10px;
+        min-width: 900px;
+    }
+
+    .action-bar-compact {
+        flex-wrap: wrap;
+        padding: 10px;
+    }
+
+    .action-bar-compact input.setting-input,
+    .action-bar-compact select.setting-input {
+        flex: 1;
+        min-width: 120px;
+    }
+}

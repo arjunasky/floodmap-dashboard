@@ -1,6 +1,6 @@
 // ============================================================
 // APP.JS — Main Application Logic
-// FloodMap Makassar — Sensor Fusion Dashboard
+// FloodMap Makassar — Sensor Fusion Dashboard + Sensor Logs
 // ============================================================
 
 const APP = {
@@ -12,19 +12,23 @@ const APP = {
 // ============================================================
 // VARIABEL GLOBAL
 // ============================================================
-let currentAllData = [];         // SEMUA data (flood_points)
-let currentVehicleData = [];     // Hanya GPS real (marker peta)
-let currentFloodData = [];       // Genangan di jalan
-let currentOffRoadData = [];     // Genangan di luar jalan
-let currentEvents = {};          // Road events
+let currentAllData = [];
+let currentVehicleData = [];
+let currentFloodData = [];
+let currentOffRoadData = [];
+let currentEvents = {};
 
-// Timers untuk deteksi offline
+// Sensor Logs
+let currentLogsData = [];
+let filteredLogsData = [];
+
+// Timers
 let currentReadingTimer = null;
 let deviceStatusTimer = null;
-const READING_TIMEOUT_MS = 8000;    // 8 detik
-const DEVICE_TIMEOUT_MS  = 20000;   // 20 detik
+const READING_TIMEOUT_MS = 8000;
+const DEVICE_TIMEOUT_MS  = 20000;
 
-// Firebase connection state
+// Firebase connection
 let firebaseConnected = true;
 
 // ============================================================
@@ -34,7 +38,7 @@ let firebaseConnected = true;
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 FloodMap Makassar dimulai...');
 
-    // Cek koneksi Firebase (untuk guard offline detection)
+    // Cek koneksi Firebase
     if (typeof db !== 'undefined') {
         db.ref('.info/connected').on('value', (snap) => {
             firebaseConnected = snap.val() === true;
@@ -48,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupMapFilters();
     setupAdminPanel();
     setupLegendToggle();
+    setupSensorLogsHandlers();      // 🔧 Sensor Logs
 
     // ============================================================
     // LISTENER: FLOOD POINTS
@@ -76,17 +81,13 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(p => !isNaN(p.latitude) && !isNaN(p.longitude))
             .sort((a, b) => a.timestamp - b.timestamp);
 
-        // Debug log sources
         const sources = [...new Set(allData.map(d => d.source))];
         console.log('📊 Sources:', sources);
         if (allData.length > 0) console.log('📊 Sample:', allData[0]);
 
         currentAllData = allData;
-
-        // HANYA filter by source
         currentVehicleData = allData.filter(p => p.source === 'gps');
 
-        // Genangan: GPS real + depth > 0 + segment_id
         const withFlood = allData.filter(p =>
             p.source === 'gps' &&
             p.depth > 0 &&
@@ -94,7 +95,6 @@ document.addEventListener('DOMContentLoaded', () => {
             p.depth_valid !== false
         );
 
-        // Road matching
         if (withFlood.length > 0 && typeof matchToRoad === 'function') {
             const matched = await matchToRoad(withFlood);
             currentFloodData   = matched.filter(p => p.matched);
@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentOffRoadData = [];
         }
 
-        console.log(`📊 GPS real: ${currentVehicleData.length} | Flood: ${currentFloodData.length} | Off-road: ${currentOffRoadData.length}`);
+        console.log(`📊 GPS: ${currentVehicleData.length} | Flood: ${currentFloodData.length} | Off-road: ${currentOffRoadData.length}`);
 
         updateUI(currentAllData, { filterTable: true });
         updateHistoryTable(currentAllData);
@@ -147,7 +147,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = (reading.status || 'aman').toLowerCase();
         const source = reading.source || 'fallback';
 
-        // Kedalaman
         const depthEl = document.getElementById('currentDepth');
         if (depthEl) {
             depthEl.textContent = depth.toFixed(1) + ' cm';
@@ -155,23 +154,18 @@ document.addEventListener('DOMContentLoaded', () => {
                                   status === 'siaga'  ? '#f59e0b' : '#22c55e';
         }
 
-        // IMU
         const imuEl = document.getElementById('currentImu');
         if (imuEl) imuEl.textContent = imuZ.toFixed(2) + ' g';
 
-        // Koordinat
         const coordEl = document.getElementById('currentCoord');
         if (coordEl) {
             coordEl.textContent = lat.toFixed(6) + '°, ' + lng.toFixed(6) + '°';
             coordEl.style.color = (source === 'gps' && sats >= 4) ? '#22c55e' : '#f59e0b';
         }
 
-        // Reset timer
         clearTimeout(currentReadingTimer);
         currentReadingTimer = setTimeout(() => {
-            if (firebaseConnected) {
-                clearSensorReadout();
-            }
+            if (firebaseConnected) clearSensorReadout();
         }, READING_TIMEOUT_MS);
     });
 
@@ -188,15 +182,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ============================================================
+    // LISTENER: SENSOR LOGS
+    // ============================================================
+    if (typeof onSensorLogs === 'function') {
+        onSensorLogs((data) => {
+            console.log('📊 Sensor logs loaded:', Object.keys(data).length);
+            updateSensorLogsUI(data);
+        });
+    }
+
+    // ============================================================
     // LISTENER: SYSTEM STATUS
     // ============================================================
     onSystemStatus((status) => {
         const lastUpdate = status.last_update || 0;
         const now = Date.now();
 
-        // ============================================================
-        // DETEKSI CACHE vs LIVE
-        // ============================================================
         const isFirstLoad = window._lastStatusUpdate === undefined;
         const isNewValue  = !isFirstLoad && lastUpdate !== window._lastStatusUpdate;
 
@@ -209,9 +210,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window._lastStatusUpdate = lastUpdate;
 
-        // ============================================================
-        // HITUNG FRESHNESS
-        // ============================================================
         const timeSinceLive = now - (window._lastStatusReceivedAt || 0);
         const isFresh = window._hasLiveUpdate && timeSinceLive < DEVICE_TIMEOUT_MS;
 
@@ -222,9 +220,6 @@ document.addEventListener('DOMContentLoaded', () => {
             status.esp32_online === '1'
         );
 
-        // ============================================================
-        // UPDATE TOPBAR
-        // ============================================================
         const ind = document.getElementById('espIndicator');
         if (ind) {
             if (!firebaseConnected) {
@@ -244,22 +239,10 @@ document.addEventListener('DOMContentLoaded', () => {
             setText('lastUpdate', 'Update: --:--:--');
         }
 
-        // ============================================================
-        // UPDATE SENSOR STATUS
-        // ============================================================
-        if (!firebaseConnected) {
+        if (!firebaseConnected || !window._hasLiveUpdate) {
             updateSensorStatus({
-                sensor: 'menunggu',
-                imu:    'menunggu',
-                gps:    'menunggu',
-                esp:    'menunggu'
-            });
-        } else if (!window._hasLiveUpdate) {
-            updateSensorStatus({
-                sensor: 'menunggu',
-                imu:    'menunggu',
-                gps:    'menunggu',
-                esp:    'menunggu'
+                sensor: 'menunggu', imu: 'menunggu',
+                gps: 'menunggu', esp: 'menunggu'
             });
         } else if (isFresh) {
             updateSensorStatus({
@@ -270,21 +253,14 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         } else {
             updateSensorStatus({
-                sensor: 'offline',
-                imu:    'offline',
-                gps:    'offline',
-                esp:    'offline'
+                sensor: 'offline', imu: 'offline',
+                gps: 'offline', esp: 'offline'
             });
         }
 
-        // ============================================================
-        // TIMER OFFLINE
-        // ============================================================
         clearTimeout(deviceStatusTimer);
         deviceStatusTimer = setTimeout(() => {
-            if (firebaseConnected) {
-                forceOfflineStatus();
-            }
+            if (firebaseConnected) forceOfflineStatus();
         }, DEVICE_TIMEOUT_MS);
     });
 
@@ -345,14 +321,11 @@ function forceOfflineStatus() {
     if (ind) {
         ind.innerHTML = '<i class="ti ti-circle-filled" style="color:#ef4444;"></i> ESP32 Offline';
     }
-
     setText('lastUpdate', 'Update: --:--:--');
 
     updateSensorStatus({
-        sensor: 'offline',
-        imu:    'offline',
-        gps:    'offline',
-        esp:    'offline'
+        sensor: 'offline', imu: 'offline',
+        gps: 'offline', esp: 'offline'
     });
 
     clearSensorReadout();
@@ -378,6 +351,284 @@ function setupLegendToggle() {
     if (window.innerWidth <= 768 && savedState === null) legend.classList.add('collapsed');
 
     console.log('✅ Legend toggle ready');
+}
+
+// ============================================================
+// SENSOR LOGS — HANDLERS
+// ============================================================
+function setupSensorLogsHandlers() {
+    // Search
+    const searchInput = document.getElementById('logsSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            clearTimeout(window._logsSearchTimer);
+            window._logsSearchTimer = setTimeout(applyLogsFilter, 300);
+        });
+    }
+
+    // Filter status
+    const filterStatus = document.getElementById('logsFilterStatus');
+    if (filterStatus) filterStatus.addEventListener('change', applyLogsFilter);
+
+    // Filter source
+    const filterSource = document.getElementById('logsFilterSource');
+    if (filterSource) filterSource.addEventListener('change', applyLogsFilter);
+
+    // Refresh
+    const btnRefresh = document.getElementById('btnRefreshLogs');
+    if (btnRefresh) {
+        btnRefresh.addEventListener('click', () => {
+            btnRefresh.innerHTML = '<i class="ti ti-loader ti-spin"></i>';
+            if (typeof onSensorLogsOnce === 'function') {
+                onSensorLogsOnce((data) => {
+                    updateSensorLogsUI(data);
+                    btnRefresh.innerHTML = '<i class="ti ti-refresh"></i>';
+                });
+            } else {
+                btnRefresh.innerHTML = '<i class="ti ti-refresh"></i>';
+            }
+        });
+    }
+
+    // Export buttons
+    const btnCSV = document.getElementById('btnExportLogsCSV');
+    if (btnCSV) btnCSV.addEventListener('click', () => exportLogsCSV());
+
+    const btnJSON = document.getElementById('btnExportLogsJSON');
+    if (btnJSON) btnJSON.addEventListener('click', () => exportLogsJSON());
+
+    const btnExcel = document.getElementById('btnExportLogsExcel');
+    if (btnExcel) btnExcel.addEventListener('click', () => exportLogsExcel());
+
+    console.log('✅ Sensor logs handlers ready');
+}
+
+// ============================================================
+// SENSOR LOGS — UI UPDATE
+// ============================================================
+function updateSensorLogsUI(logsData) {
+    currentLogsData = logsData;
+    applyLogsFilter();
+    updateLogsStats();
+}
+
+function applyLogsFilter() {
+    const search = (document.getElementById('logsSearch')?.value || '').toLowerCase().trim();
+    const filterStatus = document.getElementById('logsFilterStatus')?.value || 'all';
+    const filterSource = document.getElementById('logsFilterSource')?.value || 'all';
+
+    filteredLogsData = Object.values(currentLogsData || {})
+        .map(log => ({
+            ...log,
+            _depth: parseFloat(log.depth) || 0,
+            _timestamp: parseFloat(log.timestamp) || 0,
+            _lat: parseFloat(log.latitude) || 0,
+            _lng: parseFloat(log.longitude) || 0
+        }))
+        .filter(log => {
+            if (filterStatus !== 'all' && (log.status || '').toLowerCase() !== filterStatus) return false;
+            if (filterSource !== 'all' && (log.source || '').toLowerCase() !== filterSource) return false;
+            if (search) {
+                const text = `${log.status} ${log.source} ${log.segment_id} ${log.latitude} ${log.longitude}`.toLowerCase();
+                if (!text.includes(search)) return false;
+            }
+            return true;
+        })
+        .sort((a, b) => b._timestamp - a._timestamp);
+
+    renderLogsTable();
+}
+
+function renderLogsTable() {
+    const tbody = document.getElementById('logsTableBody');
+    if (!tbody) return;
+
+    const countEl = document.getElementById('logsCount');
+
+    if (filteredLogsData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="14" class="empty">Tidak ada data</td></tr>';
+        if (countEl) countEl.textContent = '(0 entri)';
+        return;
+    }
+
+    const latest = filteredLogsData.slice(0, 100);
+
+    tbody.innerHTML = latest.map((log, i) => {
+        const st = getStatusLabel(log.status);
+        const lat = parseFloat(log.latitude) || 0;
+        const lng = parseFloat(log.longitude) || 0;
+        const depth = parseFloat(log.depth) || 0;
+        const raw = parseFloat(log.depth_raw) || 0;
+        const hdop = parseFloat(log.hdop) || 0;
+        const imuZ = parseFloat(log.imuZ) || 0;
+        const imuMag = parseFloat(log.imuMag) || 0;
+        const pitch = parseFloat(log.pitch) || 0;
+        const roll = parseFloat(log.roll) || 0;
+        const segment = (log.segment_id || '-').substring(0, 12);
+
+        return `<tr>
+            <td>${i + 1}</td>
+            <td style="white-space:nowrap;">${formatTime(log.timestamp)}</td>
+            <td><strong>${depth.toFixed(1)}</strong></td>
+            <td><span class="status-badge ${st.cls}">${st.label}</span></td>
+            <td>${raw.toFixed(1)}</td>
+            <td style="font-size:10px; font-family:monospace;">${lat.toFixed(5)},<br>${lng.toFixed(5)}</td>
+            <td>${log.satellites || 0}</td>
+            <td>${hdop.toFixed(1)}</td>
+            <td>${imuZ.toFixed(2)}</td>
+            <td>${imuMag.toFixed(2)}</td>
+            <td>${pitch.toFixed(1)}°</td>
+            <td>${roll.toFixed(1)}°</td>
+            <td style="font-size:10px;">${segment}</td>
+            <td><span class="sub-badge">${log.source || '-'}</span></td>
+        </tr>`;
+    }).join('');
+
+    if (countEl) {
+        countEl.textContent = `(${latest.length} / ${filteredLogsData.length} entri)`;
+    }
+}
+
+function updateLogsStats() {
+    const allLogs = Object.values(currentLogsData || {});
+    const total = allLogs.length;
+
+    const totalEl = document.getElementById('logsTotal');
+    if (totalEl) totalEl.textContent = total;
+
+    if (total === 0) return;
+
+    const latest = allLogs.reduce((max, l) => {
+        const t = parseFloat(l.timestamp) || 0;
+        return t > max ? t : max;
+    }, 0);
+    const latestEl = document.getElementById('logsLatest');
+    if (latestEl) latestEl.textContent = formatTime(latest);
+
+    const depths = allLogs.map(l => parseFloat(l.depth) || 0).filter(d => d > 0);
+    if (depths.length > 0) {
+        const avg = depths.reduce((a, b) => a + b, 0) / depths.length;
+        const max = Math.max(...depths);
+
+        const avgEl = document.getElementById('logsAvgDepth');
+        if (avgEl) avgEl.textContent = avg.toFixed(1);
+
+        const maxEl = document.getElementById('logsMaxDepth');
+        if (maxEl) maxEl.textContent = max.toFixed(1);
+    }
+}
+
+// ============================================================
+// SENSOR LOGS — EXPORT CSV
+// ============================================================
+function exportLogsCSV() {
+    const data = filteredLogsData;
+    if (data.length === 0) {
+        alert('Tidak ada data untuk diexport');
+        return;
+    }
+
+    const headers = [
+        'No', 'Timestamp', 'Waktu', 'Depth_cm', 'Status', 'Raw_cm',
+        'Latitude', 'Longitude', 'Satellites', 'HDOP', 'Source',
+        'IMU_Z', 'IMU_Mag', 'Pitch', 'Roll', 'Segment_ID', 'Device'
+    ];
+
+    let csv = headers.join(',') + '\n';
+
+    data.forEach((log, i) => {
+        const row = [
+            i + 1,
+            log.timestamp || '',
+            formatTime(log.timestamp),
+            parseFloat(log.depth) || 0,
+            log.status || '',
+            parseFloat(log.depth_raw) || 0,
+            log.latitude || '',
+            log.longitude || '',
+            log.satellites || 0,
+            log.hdop || '',
+            log.source || '',
+            log.imuZ || '',
+            log.imuMag || '',
+            log.pitch || '',
+            log.roll || '',
+            log.segment_id || '',
+            log.device || ''
+        ];
+        csv += row.map(v => `"${v}"`).join(',') + '\n';
+    });
+
+    downloadFile(csv, `sensor_logs_${formatDateForFile()}.csv`, 'text/csv;charset=utf-8;');
+    console.log(`✅ CSV exported: ${data.length} entri`);
+}
+
+// ============================================================
+// SENSOR LOGS — EXPORT JSON
+// ============================================================
+function exportLogsJSON() {
+    const data = filteredLogsData;
+    if (data.length === 0) {
+        alert('Tidak ada data untuk diexport');
+        return;
+    }
+
+    const json = JSON.stringify(data, null, 2);
+    downloadFile(json, `sensor_logs_${formatDateForFile()}.json`, 'application/json');
+    console.log(`✅ JSON exported: ${data.length} entri`);
+}
+
+// ============================================================
+// SENSOR LOGS — EXPORT EXCEL
+// ============================================================
+function exportLogsExcel() {
+    const data = filteredLogsData;
+    if (data.length === 0) {
+        alert('Tidak ada data untuk diexport');
+        return;
+    }
+
+    let html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel">';
+    html += '<head><meta charset="UTF-8"></head><body>';
+    html += '<table border="1">';
+
+    html += '<tr style="background:#0f172a; color:#fff; font-weight:bold;">';
+    ['No', 'Waktu', 'Depth (cm)', 'Status', 'Raw (cm)', 'Latitude', 'Longitude',
+     'Satellites', 'HDOP', 'Source', 'IMU Z', 'IMU Mag', 'Pitch', 'Roll', 'Segment', 'Device']
+        .forEach(h => html += `<th>${h}</th>`);
+    html += '</tr>';
+
+    data.forEach((log, i) => {
+        html += '<tr>';
+        html += `<td>${i + 1}</td>`;
+        html += `<td>${new Date(parseFloat(log.timestamp)).toLocaleString('id-ID')}</td>`;
+        html += `<td>${parseFloat(log.depth) || 0}</td>`;
+        html += `<td>${log.status || ''}</td>`;
+        html += `<td>${parseFloat(log.depth_raw) || 0}</td>`;
+        html += `<td>${log.latitude || ''}</td>`;
+        html += `<td>${log.longitude || ''}</td>`;
+        html += `<td>${log.satellites || 0}</td>`;
+        html += `<td>${log.hdop || ''}</td>`;
+        html += `<td>${log.source || ''}</td>`;
+        html += `<td>${log.imuZ || ''}</td>`;
+        html += `<td>${log.imuMag || ''}</td>`;
+        html += `<td>${log.pitch || ''}</td>`;
+        html += `<td>${log.roll || ''}</td>`;
+        html += `<td>${log.segment_id || ''}</td>`;
+        html += `<td>${log.device || ''}</td>`;
+        html += '</tr>';
+    });
+
+    html += '</table></body></html>';
+
+    downloadFile(html, `sensor_logs_${formatDateForFile()}.xls`, 'application/vnd.ms-excel');
+    console.log(`✅ Excel exported: ${data.length} entri`);
+}
+
+function formatDateForFile() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
 
 // ============================================================
@@ -435,6 +686,10 @@ function setupNavigation() {
             if (page === 'stats') {
                 updateCharts(currentFloodData);
                 if (typeof updateEventChart === 'function') updateEventChart(currentEvents);
+            }
+            if (page === 'sensorlogs') {
+                applyLogsFilter();
+                updateLogsStats();
             }
         });
     });
@@ -621,7 +876,7 @@ function updateEventsTable(events) {
 }
 
 // ============================================================
-// EXPORT
+// EXPORT BUTTONS (untuk Event Jalan)
 // ============================================================
 function setupExportButtons() {
     const csv = document.getElementById('btnExportEventsCSV');
@@ -669,5 +924,7 @@ function downloadFile(content, filename, type) {
 window.APP = APP;
 window.initMap = initMap;
 window.resetViewOnly = resetViewOnly;
+window.updateSensorLogsUI = updateSensorLogsUI;
+window.applyLogsFilter = applyLogsFilter;
 
 console.log('✅ app.js loaded');

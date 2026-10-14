@@ -37,6 +37,7 @@
             <a href="#" class="nav-link active" data-page="map"><i class="ti ti-map"></i><span>Peta Genangan</span></a>
             <a href="#" class="nav-link" data-page="history"><i class="ti ti-list-details"></i><span>Riwayat Data</span></a>
             <a href="#" class="nav-link" data-page="stats"><i class="ti ti-chart-bar"></i><span>Statistik</span></a>
+            <a href="#" class="nav-link" data-page="sensorlogs"><i class="ti ti-database"></i><span>Sensor Logs</span></a>
             <a href="#" class="nav-link" data-page="events"><i class="ti ti-alert-road"></i><span>Event Jalan</span></a>
             <a href="#" class="nav-link" data-page="settings"><i class="ti ti-settings"></i><span>Konfigurasi</span></a>
         </nav>
@@ -279,6 +280,119 @@
                 </div>
             </div>
         </section>
+        
+        <!-- PAGE SENSOR LOGS -->
+<section class="page-content" id="page-sensorlogs">
+
+    <!-- Stats Card -->
+    <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:16px;">
+        <div class="stat-card glass">
+            <div class="stat-icon blue"><i class="ti ti-database"></i></div>
+            <div class="stat-info">
+                <span class="stat-label">Total Logs</span>
+                <span class="stat-value" id="logsTotal">0</span>
+                <span class="stat-sub">Data tersimpan</span>
+            </div>
+        </div>
+        <div class="stat-card glass">
+            <div class="stat-icon green"><i class="ti ti-clock"></i></div>
+            <div class="stat-info">
+                <span class="stat-label">Log Terbaru</span>
+                <span class="stat-value" id="logsLatest">--:--</span>
+                <span class="stat-sub">Waktu terakhir</span>
+            </div>
+        </div>
+        <div class="stat-card glass">
+            <div class="stat-icon yellow"><i class="ti ti-wave-square"></i></div>
+            <div class="stat-info">
+                <span class="stat-label">Rata-rata Depth</span>
+                <span class="stat-value" id="logsAvgDepth">0</span>
+                <span class="stat-sub">cm</span>
+            </div>
+        </div>
+        <div class="stat-card glass">
+            <div class="stat-icon red"><i class="ti ti-alert-triangle"></i></div>
+            <div class="stat-info">
+                <span class="stat-label">Max Depth</span>
+                <span class="stat-value" id="logsMaxDepth">0</span>
+                <span class="stat-sub">cm</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel Sensor Logs -->
+    <div class="panel">
+        <div class="panel-header">
+            <i class="ti ti-database"></i> Sensor Logs
+            <span class="panel-sub" id="logsCount">(0 entri)</span>
+        </div>
+        <div class="panel-body">
+
+            <!-- Filter Bar -->
+            <div class="action-bar-compact" style="background:#f8fafc;">
+                <input type="text" id="logsSearch" placeholder="🔍 Cari lokasi / status..." 
+                       class="setting-input" style="flex:1; min-width:180px; padding:6px 12px; font-size:12px;" />
+                
+                <select id="logsFilterStatus" class="setting-input" style="width:130px; padding:6px 12px; font-size:12px;">
+                    <option value="all">Semua Status</option>
+                    <option value="aman">Aman</option>
+                    <option value="siaga">Siaga</option>
+                    <option value="bahaya">Bahaya</option>
+                </select>
+
+                <select id="logsFilterSource" class="setting-input" style="width:130px; padding:6px 12px; font-size:12px;">
+                    <option value="all">Semua Source</option>
+                    <option value="gps">GPS</option>
+                    <option value="fallback">Fallback</option>
+                </select>
+
+                <button class="btn outline" id="btnRefreshLogs" style="padding:6px 12px; font-size:12px;">
+                    <i class="ti ti-refresh"></i>
+                </button>
+
+                <button class="btn primary" id="btnExportLogsCSV" style="padding:6px 14px; font-size:12px;">
+                    <i class="ti ti-download"></i> CSV
+                </button>
+
+                <button class="btn outline" id="btnExportLogsJSON" style="padding:6px 14px; font-size:12px;">
+                    <i class="ti ti-download"></i> JSON
+                </button>
+
+                <button class="btn outline" id="btnExportLogsExcel" style="padding:6px 14px; font-size:12px;">
+                    <i class="ti ti-file-spreadsheet"></i> Excel
+                </button>
+            </div>
+
+            <!-- Tabel -->
+            <div class="table-wrap" style="max-height:520px; overflow-y:auto;">
+                <table id="logsTable">
+                    <thead style="position:sticky; top:0; z-index:10;">
+                        <tr>
+                            <th>#</th>
+                            <th>Waktu</th>
+                            <th>Depth</th>
+                            <th>Status</th>
+                            <th>Raw</th>
+                            <th>Koordinat</th>
+                            <th>Sat</th>
+                            <th>HDOP</th>
+                            <th>IMU Z</th>
+                            <th>IMU Mag</th>
+                            <th>Pitch</th>
+                            <th>Roll</th>
+                            <th>Segment</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                        <tr><td colspan="14" class="empty">Memuat data...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+</section>
 
         <!-- PAGE SETTINGS -->
 <!-- PAGE SETTINGS -->

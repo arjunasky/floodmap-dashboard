@@ -264,4 +264,128 @@ window.formatTime = formatTime;
 window.getStatusLabel = getStatusLabel;
 window.updateOffRoadStats = updateOffRoadStats;
 
+// ============================================================
+// SENSOR LOGS — Render tabel
+// ============================================================
+let currentLogsData = [];
+let filteredLogsData = [];
+
+function updateSensorLogsUI(logsData) {
+    currentLogsData = logsData;
+    applyLogsFilter();
+    updateLogsStats();
+}
+
+function applyLogsFilter() {
+    const search = (document.getElementById('logsSearch')?.value || '').toLowerCase().trim();
+    const filterStatus = document.getElementById('logsFilterStatus')?.value || 'all';
+    const filterSource = document.getElementById('logsFilterSource')?.value || 'all';
+
+    filteredLogsData = Object.values(currentLogsData || {})
+        .map(log => ({
+            ...log,
+            _depth: parseFloat(log.depth) || 0,
+            _timestamp: parseFloat(log.timestamp) || 0,
+            _lat: parseFloat(log.latitude) || 0,
+            _lng: parseFloat(log.longitude) || 0
+        }))
+        .filter(log => {
+            if (filterStatus !== 'all' && (log.status || '').toLowerCase() !== filterStatus) return false;
+            if (filterSource !== 'all' && (log.source || '').toLowerCase() !== filterSource) return false;
+            if (search) {
+                const text = `${log.status} ${log.source} ${log.segment_id} ${log.latitude} ${log.longitude}`.toLowerCase();
+                if (!text.includes(search)) return false;
+            }
+            return true;
+        })
+        .sort((a, b) => b._timestamp - a._timestamp);
+
+    renderLogsTable();
+}
+
+function renderLogsTable() {
+    const tbody = document.getElementById('logsTableBody');
+    if (!tbody) return;
+
+    const countEl = document.getElementById('logsCount');
+
+    if (filteredLogsData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="14" class="empty">Tidak ada data</td></tr>';
+        if (countEl) countEl.textContent = '(0 entri)';
+        return;
+    }
+
+    const latest = filteredLogsData.slice(0, 100); // tampilkan max 100
+
+    tbody.innerHTML = latest.map((log, i) => {
+        const st = getStatusLabel(log.status);
+        const lat = parseFloat(log.latitude) || 0;
+        const lng = parseFloat(log.longitude) || 0;
+        const depth = parseFloat(log.depth) || 0;
+        const raw = parseFloat(log.depth_raw) || 0;
+        const hdop = parseFloat(log.hdop) || 0;
+        const imuZ = parseFloat(log.imuZ) || 0;
+        const imuMag = parseFloat(log.imuMag) || 0;
+        const pitch = parseFloat(log.pitch) || 0;
+        const roll = parseFloat(log.roll) || 0;
+        const segment = (log.segment_id || '-').substring(0, 12);
+
+        return `<tr>
+            <td>${i + 1}</td>
+            <td style="white-space:nowrap;">${formatTime(log.timestamp)}</td>
+            <td><strong>${depth.toFixed(1)}</strong></td>
+            <td><span class="status-badge ${st.cls}">${st.label}</span></td>
+            <td>${raw.toFixed(1)}</td>
+            <td style="font-size:10px; font-family:monospace;">${lat.toFixed(5)},<br>${lng.toFixed(5)}</td>
+            <td>${log.satellites || 0}</td>
+            <td>${hdop.toFixed(1)}</td>
+            <td>${imuZ.toFixed(2)}</td>
+            <td>${imuMag.toFixed(2)}</td>
+            <td>${pitch.toFixed(1)}°</td>
+            <td>${roll.toFixed(1)}°</td>
+            <td style="font-size:10px;">${segment}</td>
+            <td><span class="sub-badge">${log.source || '-'}</span></td>
+        </tr>`;
+    }).join('');
+
+    if (countEl) {
+        countEl.textContent = `(${latest.length} / ${filteredLogsData.length} entri)`;
+    }
+}
+
+function updateLogsStats() {
+    const allLogs = Object.values(currentLogsData || {});
+    const total = allLogs.length;
+
+    const totalEl = document.getElementById('logsTotal');
+    if (totalEl) totalEl.textContent = total;
+
+    if (total === 0) return;
+
+    // Log terbaru
+    const latest = allLogs.reduce((max, l) => {
+        const t = parseFloat(l.timestamp) || 0;
+        return t > max ? t : max;
+    }, 0);
+    const latestEl = document.getElementById('logsLatest');
+    if (latestEl) latestEl.textContent = formatTime(latest);
+
+    // Statistik depth
+    const depths = allLogs.map(l => parseFloat(l.depth) || 0).filter(d => d > 0);
+    if (depths.length > 0) {
+        const avg = depths.reduce((a, b) => a + b, 0) / depths.length;
+        const max = Math.max(...depths);
+
+        const avgEl = document.getElementById('logsAvgDepth');
+        if (avgEl) avgEl.textContent = avg.toFixed(1);
+
+        const maxEl = document.getElementById('logsMaxDepth');
+        if (maxEl) maxEl.textContent = max.toFixed(1);
+    }
+}
+
+// Export ke window
+window.updateSensorLogsUI = updateSensorLogsUI;
+window.applyLogsFilter = applyLogsFilter;
+
 console.log('✅ ui.js loaded');

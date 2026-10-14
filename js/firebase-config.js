@@ -62,4 +62,19 @@ db.ref('.info/connected').on('value', (snap) => {
   console.log('🔥 Firebase:', connected ? 'TERHUBUNG' : 'TERPUTUS');
 });
 
+// ============================================================
+// SENSOR LOGS LISTENER
+// ============================================================
+function onSensorLogs(callback) {
+  db.ref('sensor_logs').limitToLast(1000).on('value', (snap) => {
+      callback(snap.val() || {});
+  });
+}
+
+function onSensorLogsOnce(callback) {
+  db.ref('sensor_logs').limitToLast(1000).once('value').then((snap) => {
+      callback(snap.val() || {});
+  });
+}
+
 console.log('✅ firebase-config.js loaded');
