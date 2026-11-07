@@ -15,7 +15,7 @@ let roadEventMarkers = [];
 let totalDistance = 0;
 let isFirstLoad = true;
 
-// 🔧 Variabel untuk menyimpan jejak motor (Rotasi Zebra)
+// 🔧 Variabel untuk Counter & Jejak Motor
 let latestVehicleTracks = [];
 let globalFloodCount = 0;
 let globalEventCount = 0;
@@ -59,7 +59,7 @@ function getWeightPixels(lat, zoom, widthMeters) {
     return w;
 }
 
-// 🔧 Rumus Bearing: Menghitung sudut arah jalan
+// 🔧 Rumus Bearing: Menghitung sudut arah jalan (0 = Utara, 90 = Timur)
 function calculateBearing(lat1, lng1, lat2, lng2) {
     const toRad = d => d * Math.PI / 180;
     const toDeg = r => r * 180 / Math.PI;
@@ -69,7 +69,7 @@ function calculateBearing(lat1, lng1, lat2, lng2) {
     return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-// 🔧 Snap marker ke jalan
+// 🔧 Snap marker ke jalan terdekat
 const snappedMarkerCache = {};
 async function snapMarkerToRoad(lat, lng, segmentId) {
     if (snappedMarkerCache[segmentId]) return snappedMarkerCache[segmentId];
@@ -207,7 +207,7 @@ async function matchToRoad(points) {
             `${p.longitude.toFixed(6)},${p.latitude.toFixed(6)}`
         ).join(';');
 
-        // 🔧 Perbaikan: radiuses harus dinamis sebanyak jumlah titik
+        // 🔧 Perbaikan: radiuses harus dinamis
         const radiuses = new Array(batch.length).fill(50).join(';');
 
         const url = `https://router.project-osrm.org/match/v1/driving/${coords}` +
@@ -293,7 +293,7 @@ function buildPolylineSegments(points) {
 }
 
 // ============================================================
-// 6. REDRAW MAP
+// 6. REDRAW MAP (Genangan)
 // ============================================================
 async function redrawMapFromData(allData, floodData, offRoadData) {
     if (!map || !floodLayerGroup) return;
@@ -301,7 +301,7 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     if (!floodData) floodData = [];
     if (!offRoadData) offRoadData = [];
 
-    // 🔧 Simpan jejak motor untuk rotasi zebra
+    // 🔧 Simpan jejak motor
     if (allData && allData.length > 0) {
         latestVehicleTracks = allData.filter(p => p.source === 'gps').sort((a, b) => a.timestamp - b.timestamp);
     }
@@ -314,7 +314,6 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     totalDistance = 0;
 
     // ---- RENDER POLYLINE (DINONAKTIFKAN AGAR FOKUS KE MARKER) ----
-    // Kode asli Anda tetap utuh di sini. Jika ingin mengaktifkan garis, hapus /* dan */.
     /*
     if (floodData.length >= 2) {
         const groupBySeg = {};
@@ -445,13 +444,11 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     // ---- VEHICLE MARKER ----
     if (allData && allData.length > 0) {
         const last = allData[allData.length - 1];
-
         if (vehicleMarker) {
             if (!map.hasLayer(vehicleMarker)) vehicleMarker.addTo(map);
             vehicleMarker.setLatLng([last.latitude, last.longitude]);
             vehicleMarker.setZIndexOffset(1000);
         }
-
         if (isFirstLoad) {
             isFirstLoad = false;
             map.setView([last.latitude, last.longitude], 17);
@@ -477,7 +474,7 @@ function updatePolylineWeights() {
 }
 
 // ============================================================
-// 8. ROAD EVENTS MARKER (DENGAN ROTASI ZEBRA)
+// 8. ROAD EVENTS MARKER (PERBAIKAN CAKAR HARIMAU & SUDUT)
 // ============================================================
 function initRoadEventLayer(mapInstance) {
     if (!mapInstance) return;
@@ -500,17 +497,34 @@ async function renderRoadEvents(events) {
         return;
     }
 
-    const entries = Object.entries(events).sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const sortedEvents = Object.entries(events).sort((a, b) => a[1].timestamp - b[1].timestamp);
+    
+    // 🔧 Tarik data garis jalan OSRM untuk sudut
+    const pointsForMatch = sortedEvents.map(([k, ev]) => ({ latitude: parseFloat(ev.latitude), longitude: parseFloat(ev.longitude) }));
+    const roadMatch = await matchToRoad(pointsForMatch);
 
-    for (const [key, ev] of entries) {
+    const placedEvents = []; // 🔧 Mencegah penumpukan gambar
+
+    for (let i = 0; i < sortedEvents.length; i++) {
+        const [key, ev] = sortedEvents[i];
         if (ev.latitude === undefined || ev.longitude === undefined) continue;
 
         const lat = parseFloat(ev.latitude);
         const lng = parseFloat(ev.longitude);
         if (isNaN(lat) || isNaN(lng)) continue;
 
+        // 🔧 1. ANTI-MULTIPLY (Jarak < 15 meter dianggap sama)
+        let isDuplicate = false;
+        for (const placed of placedEvents) {
+            if (haversine(lat, lng, placed.lat, placed.lng) < 15.0) {
+                isDuplicate = true; 
+                break; 
+            }
+        }
+        if (isDuplicate) continue; 
+        placedEvents.push({ lat, lng });
+
         const snapped = await snapMarkerToRoad(lat, lng, 'event_' + key);
-        
         const isPothole = ev.event_type === 'pothole';
         const color = isPothole ? '#dc2626' : '#f59e0b';
         const label = isPothole ? 'Lubang' : 'Polisi Tidur';
@@ -523,39 +537,38 @@ async function renderRoadEvents(events) {
                 iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
             });
         } else {
-            // 🔧 HITUNG SUDUT BERDASARKAN JEJAK MOTOR
+            // 🔧 2. SUDUT DARI GARIS JALAN
             let angle = 0;
-            if (latestVehicleTracks && latestVehicleTracks.length > 1) {
-                let beforePoint = latestVehicleTracks[0];
-                let afterPoint = latestVehicleTracks[latestVehicleTracks.length - 1];
-                
-                for (const track of latestVehicleTracks) {
-                    if (track.timestamp <= ev.timestamp) beforePoint = track;
-                    if (track.timestamp > ev.timestamp) { afterPoint = track; break; }
+            if (roadMatch.geometry && roadMatch.geometry.length > 1) {
+                let minDist = Infinity;
+                let closestIdx = 0;
+                for (let j = 0; j < roadMatch.geometry.length; j++) {
+                    const d = haversine(lat, lng, roadMatch.geometry[j].lat, roadMatch.geometry[j].lng);
+                    if (d < minDist) { minDist = d; closestIdx = j; }
                 }
-                if (beforePoint && afterPoint && beforePoint !== afterPoint) {
-                    angle = calculateBearing(beforePoint.latitude, beforePoint.longitude, afterPoint.latitude, afterPoint.longitude);
+                
+                const p1 = roadMatch.geometry[Math.max(0, closestIdx - 1)];
+                const p2 = roadMatch.geometry[Math.min(roadMatch.geometry.length - 1, closestIdx + 1)];
+                
+                if (p1 !== p2) {
+                    angle = calculateBearing(p1.lat, p1.lng, p2.lat, p2.lng);
                 }
             }
 
             icon = L.divIcon({
                 className: 'custom-bump-marker',
-                html: `<div class="event-bump-bar" style="transform: translate(-50%, -50%) rotate(${angle}deg);"></div>`,
-                iconSize: [0, 0], 
-                iconAnchor: [0, 0], 
-                popupAnchor: [0, -8]
+                html: `<div class="event-bump-bar" style="transform: rotate(${angle}deg);"></div>`,
+                iconSize: [60, 16], iconAnchor: [30, 8], popupAnchor: [0, -8]
             });
         }
 
         const marker = L.marker([snapped.lat, snapped.lng], { icon });
-
         marker.bindPopup(`
             <div style="font-family:Inter; font-size:12px; min-width:180px;">
                 <strong style="color:${color}; font-size:14px;">${label}</strong>
                 <hr style="margin:6px 0; border:none; border-top:1px solid #e2e8f0;">
                 <table style="width:100%; font-size:11px;">
                     <tr><td><strong>Kekuatan:</strong></td><td>${(parseFloat(ev.magnitude_g)||0).toFixed(2)} g</td></tr>
-                    <tr><td><strong>Delay 2ban:</strong></td><td>${ev.delay_ms || '-'} ms</td></tr>
                     <tr><td><strong>Waktu:</strong></td><td>${formatTime(ev.timestamp)}</td></tr>
                 </table>
             </div>
@@ -604,25 +617,15 @@ function setupMapFilters() {
 
     if (cbFlood) {
         cbFlood.addEventListener('change', () => {
-            if (cbFlood.checked) {
-                if (floodLayerGroup) floodLayerGroup.addTo(map);
-            } else {
-                if (floodLayerGroup) map.removeLayer(floodLayerGroup);
-            }
+            if (cbFlood.checked) { if (floodLayerGroup) floodLayerGroup.addTo(map); }
+            else { if (floodLayerGroup) map.removeLayer(floodLayerGroup); }
         });
     }
 
     if (cbVehicle) {
         cbVehicle.addEventListener('change', () => {
-            if (cbVehicle.checked) {
-                if (vehicleMarker && !map.hasLayer(vehicleMarker)) {
-                    vehicleMarker.addTo(map);
-                }
-            } else {
-                if (vehicleMarker && map.hasLayer(vehicleMarker)) {
-                    map.removeLayer(vehicleMarker);
-                }
-            }
+            if (cbVehicle.checked) { if (vehicleMarker && !map.hasLayer(vehicleMarker)) vehicleMarker.addTo(map); }
+            else { if (vehicleMarker && map.hasLayer(vehicleMarker)) map.removeLayer(vehicleMarker); }
         });
     }
 
