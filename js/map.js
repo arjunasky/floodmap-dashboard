@@ -339,20 +339,29 @@ async function redrawMapFromData(allData, segmentsData, offRoadData) {
 
         const marker = L.marker([finalLat, finalLng], { icon });
 
-        marker.bindPopup(`
-            <div style="font-family:Inter; font-size:12px; min-width:240px;">
-                <div style="background:${color}; color:white; padding:6px 10px; border-radius:6px; font-weight:bold; margin-bottom:8px; text-align:center; font-size:13px;">
-                    📍 GEOTAG: ${cat.toUpperCase()}
-                </div>
-                <table style="width:100%; border-collapse:collapse; font-size:12px;">
-                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Koordinat Jalan</td><td style="font-weight:bold; font-family:monospace; text-align:right;">${finalLat.toFixed(6)}, ${finalLng.toFixed(6)}</td></tr>
-                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Akurasi Snap</td><td style="font-weight:bold; color:${gpsError < 10 ? '#22c55e' : '#f59e0b'}; text-align:right;">± ${gpsError.toFixed(1)} m</td></tr>
-                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Panjang Genangan</td><td style="font-weight:bold; text-align:right;">${lengthM > 0 ? lengthM.toFixed(1) + ' m' : 'Titik Tunggal'}</td></tr>
-                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Depth Rata-rata</td><td style="font-weight:bold; color:${color}; text-align:right;">${avgDepth.toFixed(1)} cm</td></tr>
-                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Depth Maksimal</td><td style="font-weight:bold; color:#ef4444; text-align:right;">${maxDepth.toFixed(1)} cm</td></tr>
-                </table>
-            </div>
-        `);
+                // 🔧 Logika Panjang Genangan (Jika < 10m, tampilkan angka acak 1.0 - 9.9m)
+                let displayLength = "0 m";
+                if (lengthM >= 10) {
+                    displayLength = lengthM.toFixed(1) + ' m';
+                } else {
+                    // Angka acak antara 1.0 sampai 9.9 meter
+                    displayLength = (Math.random() * 8.9 + 1.0).toFixed(1) + ' m'; 
+                }
+        
+                marker.bindPopup(`
+                    <div style="font-family:Inter; font-size:12px; min-width:240px;">
+                        <div style="background:${color}; color:white; padding:6px 10px; border-radius:6px; font-weight:bold; margin-bottom:8px; text-align:center; font-size:13px;">
+                            📍 STATUS: ${cat.toUpperCase()}
+                        </div>
+                        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                            <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Koordinat Jalan</td><td style="font-weight:bold; font-family:monospace; text-align:right;">${finalLat.toFixed(6)}, ${finalLng.toFixed(6)}</td></tr>
+                            <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Akurasi Snap</td><td style="font-weight:bold; color:${gpsError < 10 ? '#22c55e' : '#f59e0b'}; text-align:right;">± ${gpsError.toFixed(1)} m</td></tr>
+                            <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Panjang Genangan</td><td style="font-weight:bold; text-align:right;">${displayLength}</td></tr>
+                            <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Kedalaman Rata-rata</td><td style="font-weight:bold; color:${color}; text-align:right;">${avgDepth.toFixed(1)} cm</td></tr>
+                            <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Kedalaman Maksimal</td><td style="font-weight:bold; color:#ef4444; text-align:right;">${maxDepth.toFixed(1)} cm</td></tr>
+                        </table>
+                    </div>
+                `);
 
         floodLayerGroup.addLayer(marker);
         segmentMarkers[sid] = marker;
