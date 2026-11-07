@@ -1853,7 +1853,6 @@ table tr:last-child td {
 .event-bump-bar {
     width: 60px;
     height: 16px;
-    /* Motif garis kuning-hitam */
     background: repeating-linear-gradient(
         -45deg,
         #f59e0b,
@@ -1864,7 +1863,7 @@ table tr:last-child td {
     border: 2px solid #fff;
     border-radius: 4px;
     box-shadow: 0 3px 8px rgba(0,0,0,0.4);
-    transition: transform 0.2s ease;
+    transform-origin: center center;
 }
 
 .event-bump-bar:hover {

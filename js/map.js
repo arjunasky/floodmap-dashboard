@@ -7,45 +7,34 @@ let map = null;
 let vehicleMarker = null;
 let floodLayerGroup = null;
 let roadEventLayerGroup = null;
-let potholeLayerGroup = null; // 🔧 Tambahan untuk filter
-let bumpLayerGroup = null;    // 🔧 Tambahan untuk filter
+let potholeLayerGroup = null; 
+let bumpLayerGroup = null;    
 let vehicleLayerGroup = null;
 let segmentPolylines = {};
 let roadEventMarkers = [];
 let totalDistance = 0;
 let isFirstLoad = true;
 
-// 🔧 Variabel untuk Counter & Jejak Motor
-let latestVehicleTracks = [];
+// 🔧 Variabel Global
 let globalFloodCount = 0;
 let globalEventCount = 0;
 let globalOffRoadCount = 0;
 
+// 🔧 Simpan Jejak Motor di global agar bisa diakses fungsi Rotasi
+window.globalVehicleTracks = [];
+
 const MAP_CONFIG = {
     center: [-5.1464, 119.4396],
     zoom: 15,
-    colors: {
-        aman:   '#22c55e',
-        siaga:  '#f59e0b',
-        bahaya: '#ef4444'
-    },
+    colors: { aman: '#22c55e', siaga: '#f59e0b', bahaya: '#ef4444' },
     polylineOpacity: 0.85
 };
 
-const ROAD_CONFIG = {
-    MAX_SNAP_DISTANCE: 30,
-    MAX_GAP_BREAK:     40,
-    MIN_POINTS_SEGMENT: 2
-};
-
-const ROAD_WIDTH_M = {
-    aman:   4.0,
-    siaga:  5.0,
-    bahaya: 6.5
-};
+const ROAD_CONFIG = { MAX_SNAP_DISTANCE: 30, MAX_GAP_BREAK: 40, MIN_POINTS_SEGMENT: 2 };
+const ROAD_WIDTH_M = { aman: 4.0, siaga: 5.0, bahaya: 6.5 };
 
 // ============================================================
-// UTIL — meter to pixel
+// UTIL
 // ============================================================
 function metersPerPixel(lat, zoom) {
     return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
@@ -54,12 +43,10 @@ function metersPerPixel(lat, zoom) {
 function getWeightPixels(lat, zoom, widthMeters) {
     const mpp = metersPerPixel(lat, zoom);
     let w = widthMeters / mpp;
-    if (w < 3) w = 3;
-    if (w > 50) w = 50;
-    return w;
+    return w < 3 ? 3 : (w > 50 ? 50 : w);
 }
 
-// 🔧 Rumus Bearing: Menghitung sudut arah jalan (0 = Utara, 90 = Timur)
+// 🔧 Rumus Bearing: Menghitung sudut arah jalan
 function calculateBearing(lat1, lng1, lat2, lng2) {
     const toRad = d => d * Math.PI / 180;
     const toDeg = r => r * 180 / Math.PI;
@@ -69,7 +56,7 @@ function calculateBearing(lat1, lng1, lat2, lng2) {
     return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-// 🔧 Snap marker ke jalan terdekat
+// Snap to road
 const snappedMarkerCache = {};
 async function snapMarkerToRoad(lat, lng, segmentId) {
     if (snappedMarkerCache[segmentId]) return snappedMarkerCache[segmentId];
@@ -91,219 +78,56 @@ async function snapMarkerToRoad(lat, lng, segmentId) {
 // 1. INIT MAP
 // ============================================================
 function initMap() {
-    console.log('🗺️ Init Leaflet + OSM');
-
     const mapDiv = document.getElementById('map') || document.getElementById('googleMap');
-    if (!mapDiv) {
-        console.error('❌ Div map tidak ditemukan!');
-        return;
-    }
+    if (!mapDiv) return;
 
     map = L.map(mapDiv.id, {
-        center: MAP_CONFIG.center,
-        zoom: MAP_CONFIG.zoom,
-        zoomControl: true,
-        preferCanvas: true
+        center: MAP_CONFIG.center, zoom: MAP_CONFIG.zoom, zoomControl: true, preferCanvas: true
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap'
+        maxZoom: 19, attribution: '&copy; OpenStreetMap'
     }).addTo(map);
 
     floodLayerGroup = L.layerGroup().addTo(map);
     roadEventLayerGroup = L.layerGroup().addTo(map);
-    potholeLayerGroup = L.layerGroup().addTo(map); // 🔧
-    bumpLayerGroup = L.layerGroup().addTo(map);    // 🔧
+    potholeLayerGroup = L.layerGroup().addTo(map);
+    bumpLayerGroup = L.layerGroup().addTo(map);
     vehicleLayerGroup = L.layerGroup().addTo(map);
 
     vehicleMarker = L.marker(MAP_CONFIG.center, {
         icon: L.divIcon({
             className: 'vehicle-marker',
-            html: `<div style="
-                background: #3b82f6;
-                width: 18px; height: 18px;
-                border-radius: 50%;
-                border: 3px solid #fff;
-                box-shadow: 0 0 12px rgba(59,130,246,0.7);
-            "></div>`,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-        }),
-        zIndexOffset: 1000
+            html: `<div style="background: #3b82f6; width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 12px rgba(59,130,246,0.7);"></div>`,
+            iconSize: [24, 24], iconAnchor: [12, 12]
+        }), zIndexOffset: 1000
     });
 
     L.control.scale({ imperial: false, metric: true }).addTo(map);
-
-    map.on('zoomend', () => {
-        updatePolylineWeights();
-    });
-
-    console.log('✅ Map ready');
+    map.on('zoomend', () => { updatePolylineWeights(); });
     return map;
 }
 
-// ============================================================
-// 2. HAVERSINE
-// ============================================================
 function haversine(lat1, lng1, lat2, lng2) {
     const R = 6371000;
     const toRad = d => d * Math.PI / 180;
     const dLat = toRad(lat2 - lat1);
     const dLng = toRad(lng2 - lng1);
-    const a = Math.sin(dLat/2)**2 +
-              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-              Math.sin(dLng/2)**2;
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
     return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 // ============================================================
-// 3. SMOOTH PATH
-// ============================================================
-function smoothPath(points) {
-    if (points.length < 3) return points;
-    const out = [points[0]];
-    for (let i = 1; i < points.length - 1; i++) {
-        const p = points[i - 1];
-        const c = points[i];
-        const n = points[i + 1];
-        out.push([
-            (p[0] + c[0] * 2 + n[0]) / 4,
-            (p[1] + c[1] * 2 + n[1]) / 4
-        ]);
-    }
-    out.push(points[points.length - 1]);
-    return out;
-}
-
-// ============================================================
-// 4. ROAD MATCHING — OSRM
-// ============================================================
-const roadMatchCache = {};
-
-async function matchToRoad(points) {
-    if (points.length === 0) return { matched: [], geometry: [] };
-
-    const batches = [];
-    for (let i = 0; i < points.length; i += 90) {
-        batches.push(points.slice(i, i + 90));
-    }
-
-    const allMatched = [];
-    const allGeometry = [];
-
-    for (const batch of batches) {
-        const cacheKey = batch.map(p =>
-            `${p.latitude.toFixed(4)},${p.longitude.toFixed(4)}`
-        ).join('|');
-
-        if (roadMatchCache[cacheKey]) {
-            allMatched.push(...roadMatchCache[cacheKey].matched);
-            allGeometry.push(...roadMatchCache[cacheKey].geometry);
-            continue;
-        }
-
-        const coords = batch.map(p =>
-            `${p.longitude.toFixed(6)},${p.latitude.toFixed(6)}`
-        ).join(';');
-
-        // 🔧 Perbaikan: radiuses harus dinamis
-        const radiuses = new Array(batch.length).fill(50).join(';');
-
-        const url = `https://router.project-osrm.org/match/v1/driving/${coords}` +
-                    `?geometries=geojson&overview=full&gaps=ignore&tidy=true&radiuses=${radiuses}`;
-
-        try {
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(`OSRM ${res.status}`);
-            const data = await res.json();
-
-            const tracepoints = data.tracepoints || [];
-            const matched = [];
-
-            batch.forEach((p, idx) => {
-                const tp = tracepoints[idx];
-                const snapDist = tp ? tp.distance : 999;
-                matched.push({
-                    ...p,
-                    snapDistance: snapDist,
-                    matched: snapDist <= ROAD_CONFIG.MAX_SNAP_DISTANCE
-                });
-            });
-
-            const geometry = [];
-            if (data.matchings && data.matchings.length > 0) {
-                data.matchings.forEach(m => {
-                    if (m.geometry && m.geometry.coordinates) {
-                        m.geometry.coordinates.forEach(c => {
-                            geometry.push({ lat: c[1], lng: c[0] });
-                        });
-                    }
-                });
-            }
-
-            roadMatchCache[cacheKey] = { matched, geometry };
-            allMatched.push(...matched);
-            allGeometry.push(...geometry);
-
-        } catch (e) {
-            console.warn('⚠️ OSRM error:', e.message);
-            batch.forEach(p => allMatched.push({ ...p, matched: true }));
-        }
-    }
-
-    return { matched: allMatched, geometry: allGeometry };
-}
-
-// ============================================================
-// 5. BUILD SEGMENTS
-// ============================================================
-function buildPolylineSegments(points) {
-    if (points.length < 2) return [];
-
-    const DRY = (typeof DRY_THRESHOLD !== 'undefined') ? DRY_THRESHOLD : 3.0;
-    points = points.filter(p => (p.depth || 0) >= DRY);
-
-    if (points.length < 2) return [];
-
-    const segments = [];
-    let current = [points[0]];
-
-    for (let i = 1; i < points.length; i++) {
-        const dist = haversine(
-            points[i-1].latitude, points[i-1].longitude,
-            points[i].latitude, points[i].longitude
-        );
-
-        if (dist > ROAD_CONFIG.MAX_GAP_BREAK) {
-            if (current.length >= ROAD_CONFIG.MIN_POINTS_SEGMENT) {
-                segments.push(current);
-            }
-            current = [points[i]];
-        } else {
-            current.push(points[i]);
-        }
-    }
-
-    if (current.length >= ROAD_CONFIG.MIN_POINTS_SEGMENT) {
-        segments.push(current);
-    }
-
-    return segments;
-}
-
-// ============================================================
-// 6. REDRAW MAP (Genangan)
+// 6. REDRAW MAP (Genangan & Simpan Jejak Motor)
 // ============================================================
 async function redrawMapFromData(allData, floodData, offRoadData) {
     if (!map || !floodLayerGroup) return;
-
     if (!floodData) floodData = [];
     if (!offRoadData) offRoadData = [];
 
-    // 🔧 Simpan jejak motor
+    // 🔧 SIMPAN JEJAK MOTOR UNTUK ROTASI JALAN
     if (allData && allData.length > 0) {
-        latestVehicleTracks = allData.filter(p => p.source === 'gps').sort((a, b) => a.timestamp - b.timestamp);
+        window.globalVehicleTracks = allData.filter(p => p.source === 'gps').sort((a, b) => a.timestamp - b.timestamp);
     }
 
     const DRY = (typeof DRY_THRESHOLD !== 'undefined') ? DRY_THRESHOLD : 3.0;
@@ -313,83 +137,7 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     segmentPolylines = {};
     totalDistance = 0;
 
-    // ---- RENDER POLYLINE (DINONAKTIFKAN AGAR FOKUS KE MARKER) ----
-    /*
-    if (floodData.length >= 2) {
-        const groupBySeg = {};
-        floodData.forEach(p => {
-            if (!p.segment_id) return;
-            if (!groupBySeg[p.segment_id]) groupBySeg[p.segment_id] = [];
-            groupBySeg[p.segment_id].push(p);
-        });
-
-        for (const [sid, points] of Object.entries(groupBySeg)) {
-            points.sort((a, b) => a.timestamp - b.timestamp);
-            const segments = buildPolylineSegments(points);
-
-            for (let idx = 0; idx < segments.length; idx++) {
-                const seg = segments[idx];
-                if (seg.length < 2) continue;
-
-                const avgDepth = seg.reduce((s, p) => s + (p.depth || 0), 0) / seg.length;
-                const category = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
-                const color = MAP_CONFIG.colors[category];
-                const widthMeters = ROAD_WIDTH_M[category];
-
-                let path = seg.map(p => [p.latitude, p.longitude]);
-
-                try {
-                    const matchResult = await matchToRoad(seg);
-                    if (matchResult.geometry && matchResult.geometry.length >= 2) {
-                        path = matchResult.geometry.map(g => [g.lat, g.lng]);
-                    } else {
-                        path = smoothPath(path);
-                    }
-                } catch (e) {
-                    path = smoothPath(path);
-                }
-
-                let segLength = 0;
-                for (let i = 1; i < path.length; i++) {
-                    segLength += haversine(path[i-1][0], path[i-1][1], path[i][0], path[i][1]);
-                }
-                totalDistance += segLength;
-
-                const centerLat = path[Math.floor(path.length / 2)][0];
-                const currentZoom = map.getZoom();
-                const weight = getWeightPixels(centerLat, currentZoom, widthMeters);
-
-                const polyline = L.polyline(path, {
-                    color: color,
-                    weight: weight,
-                    opacity: MAP_CONFIG.polylineOpacity,
-                    lineJoin: 'round',
-                    lineCap: 'round',
-                    smoothFactor: 0.5
-                });
-
-                polyline.bindPopup(`
-                    <div style="font-family:Inter; font-size:12px; min-width:180px;">
-                        <strong style="color:${color}; font-size:13px;">● ${category.toUpperCase()}</strong><br>
-                        <strong>Segmen:</strong> ${sid}<br>
-                        <strong>Panjang:</strong> ${segLength.toFixed(1)} m<br>
-                        <strong>Depth rata:</strong> ${avgDepth.toFixed(1)} cm<br>
-                        <strong>Titik GPS:</strong> ${seg.length}
-                    </div>
-                `);
-
-                floodLayerGroup.addLayer(polyline);
-                segmentPolylines[`${sid}_${idx}`] = {
-                    layer: polyline,
-                    widthMeters: widthMeters,
-                    lat: centerLat
-                };
-            }
-        }
-    }
-    */
-
-    // ---- MARKER PER SEGMENT (PIN TETESAN AIR) ----
+    // ---- MARKER GENANGAN (PIN) ----
     const segmentMarkers = {};
     
     for (const p of floodData) {
@@ -421,12 +169,9 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         });
 
         const marker = L.marker([finalLat, finalLng], { icon });
-
         marker.bindPopup(`
             <div style="font-family:Inter; font-size:12px; min-width:240px;">
-                <div style="background:${color}; color:white; padding:6px 10px; border-radius:6px; font-weight:bold; margin-bottom:8px; text-align:center; font-size:13px;">
-                    📍 GEOTAG: ${cat.toUpperCase()}
-                </div>
+                <div style="background:${color}; color:white; padding:6px 10px; border-radius:6px; font-weight:bold; margin-bottom:8px; text-align:center; font-size:13px;">📍 GEOTAG: ${cat.toUpperCase()}</div>
                 <table style="width:100%; border-collapse:collapse; font-size:12px;">
                     <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Koordinat Jalan</td><td style="font-weight:bold; font-family:monospace; text-align:right;">${finalLat.toFixed(6)}, ${finalLng.toFixed(6)}</td></tr>
                     <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Akurasi Snap</td><td style="font-weight:bold; color:${gpsError < 10 ? '#22c55e' : '#f59e0b'}; text-align:right;">± ${gpsError.toFixed(1)} m</td></tr>
@@ -436,12 +181,10 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
                 </table>
             </div>
         `);
-
         floodLayerGroup.addLayer(marker);
         segmentMarkers[sid] = marker;
     }
 
-    // ---- VEHICLE MARKER ----
     if (allData && allData.length > 0) {
         const last = allData[allData.length - 1];
         if (vehicleMarker) {
@@ -449,12 +192,9 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
             vehicleMarker.setLatLng([last.latitude, last.longitude]);
             vehicleMarker.setZIndexOffset(1000);
         }
-        if (isFirstLoad) {
-            isFirstLoad = false;
-            map.setView([last.latitude, last.longitude], 17);
-        }
+        if (isFirstLoad) { isFirstLoad = false; map.setView([last.latitude, last.longitude], 17); }
     }
-
+    
     globalFloodCount = floodData.length;
     globalOffRoadCount = offRoadData.length;
     updateMapStats();
@@ -474,7 +214,7 @@ function updatePolylineWeights() {
 }
 
 // ============================================================
-// 8. ROAD EVENTS MARKER (PERBAIKAN CAKAR HARIMAU & SUDUT)
+// 8. ROAD EVENTS MARKER (ROTASI PRESISI BERDASARKAN JEJAK MOTOR)
 // ============================================================
 function initRoadEventLayer(mapInstance) {
     if (!mapInstance) return;
@@ -498,12 +238,8 @@ async function renderRoadEvents(events) {
     }
 
     const sortedEvents = Object.entries(events).sort((a, b) => a[1].timestamp - b[1].timestamp);
-    
-    // 🔧 Tarik data garis jalan OSRM untuk sudut
-    const pointsForMatch = sortedEvents.map(([k, ev]) => ({ latitude: parseFloat(ev.latitude), longitude: parseFloat(ev.longitude) }));
-    const roadMatch = await matchToRoad(pointsForMatch);
-
-    const placedEvents = []; // 🔧 Mencegah penumpukan gambar
+    const placedEvents = []; 
+    const tracks = window.globalVehicleTracks || []; // Ambil data jejak motor
 
     for (let i = 0; i < sortedEvents.length; i++) {
         const [key, ev] = sortedEvents[i];
@@ -513,7 +249,7 @@ async function renderRoadEvents(events) {
         const lng = parseFloat(ev.longitude);
         if (isNaN(lat) || isNaN(lng)) continue;
 
-        // 🔧 1. ANTI-MULTIPLY (Jarak < 15 meter dianggap sama)
+        // 1. ANTI-MULTIPLY (Jarak < 15 meter diabaikan)
         let isDuplicate = false;
         for (const placed of placedEvents) {
             if (haversine(lat, lng, placed.lat, placed.lng) < 15.0) {
@@ -537,28 +273,37 @@ async function renderRoadEvents(events) {
                 iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
             });
         } else {
-            // 🔧 2. SUDUT DARI GARIS JALAN
+            // 🔧 2. CARI SUDUT DARI JEJAK MOTOR TERDEKAT
             let angle = 0;
-            if (roadMatch.geometry && roadMatch.geometry.length > 1) {
+            if (tracks.length > 1) {
                 let minDist = Infinity;
                 let closestIdx = 0;
-                for (let j = 0; j < roadMatch.geometry.length; j++) {
-                    const d = haversine(lat, lng, roadMatch.geometry[j].lat, roadMatch.geometry[j].lng);
+                // Cari posisi motor yang paling dekat dengan polisi tidur
+                for (let j = 0; j < tracks.length; j++) {
+                    const d = haversine(lat, lng, tracks[j].latitude, tracks[j].longitude);
                     if (d < minDist) { minDist = d; closestIdx = j; }
                 }
                 
-                const p1 = roadMatch.geometry[Math.max(0, closestIdx - 1)];
-                const p2 = roadMatch.geometry[Math.min(roadMatch.geometry.length - 1, closestIdx + 1)];
+                // Ambil 3 titik sebelum dan 3 titik sesudah untuk melihat arah
+                const p1 = tracks[Math.max(0, closestIdx - 3)];
+                const p2 = tracks[Math.min(tracks.length - 1, closestIdx + 3)];
                 
-                if (p1 !== p2) {
-                    angle = calculateBearing(p1.lat, p1.lng, p2.lat, p2.lng);
+                if (p1 && p2 && p1 !== p2) {
+                    angle = calculateBearing(p1.latitude, p1.longitude, p2.latitude, p2.longitude);
                 }
             }
 
+            // 🔧 Trik CSS: Kotak transparan agar putaran tetap di tengah jalan
             icon = L.divIcon({
                 className: 'custom-bump-marker',
-                html: `<div class="event-bump-bar" style="transform: rotate(${angle}deg);"></div>`,
-                iconSize: [60, 16], iconAnchor: [30, 8], popupAnchor: [0, -8]
+                html: `
+                    <div style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; transform: rotate(${angle}deg);">
+                        <div class="event-bump-bar"></div>
+                    </div>
+                `,
+                iconSize: [60, 60], 
+                iconAnchor: [30, 30], 
+                popupAnchor: [0, -30]
             });
         }
 
