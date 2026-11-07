@@ -425,9 +425,10 @@ async function renderRoadEvents(events) {
     }
 
     const sortedEvents = Object.entries(events).sort((a, b) => a[1].timestamp - b[1].timestamp);
-    const placedEvents = []; 
     const tracks = window.globalVehicleTracks || []; 
+    const processedEvents = []; // 🔧 Menampung event yang sudah lolos filter anti-multiply
 
+    // 🔧 TAHAP 1: SNAP SEMUA EVENT DAN BUANG YANG BERDEKATAN
     for (let i = 0; i < sortedEvents.length; i++) {
         const [key, ev] = sortedEvents[i];
         if (ev.latitude === undefined || ev.longitude === undefined) continue;
@@ -436,19 +437,35 @@ async function renderRoadEvents(events) {
         const lng = parseFloat(ev.longitude);
         if (isNaN(lat) || isNaN(lng)) continue;
 
-        // 🔧 1. ANTI-MULTIPLY (Jarak < 20 meter diabaikan)
+        // Tarik titik ke jalan
+        const snapped = await snapMarkerToRoad(lat, lng, 'event_' + key);
+
+        // Cek apakah titik snap ini menumpuk dengan event sebelumnya
         let isDuplicate = false;
-        for (const placed of placedEvents) {
-            if (haversine(lat, lng, placed.lat, placed.lng) < 20.0) {
+        for (const placed of processedEvents) {
+            // 🔧 Cek jarak menggunakan koordinat SNAP (Radius 30 meter)
+            if (haversine(snapped.lat, snapped.lng, placed.snapped.lat, placed.snapped.lng) < 30.0) {
                 isDuplicate = true; 
                 break; 
             }
         }
         if (isDuplicate) continue; 
-        placedEvents.push({ lat, lng });
 
-        const snapped = await snapMarkerToRoad(lat, lng, 'event_' + key);
-        const isPothole = ev.event_type === 'pothole';
+        // Simpan data yang lolos
+        processedEvents.push({
+            key: key,
+            ev: ev,
+            snapped: snapped,
+            isPothole: ev.event_type === 'pothole'
+        });
+    }
+
+    // 🔧 TAHAP 2: GAMBAR MARKER YANG SUDAH BERSIH
+    for (const item of processedEvents) {
+        const ev = item.ev;
+        const snapped = item.snapped;
+        const isPothole = item.isPothole;
+        
         const color = isPothole ? '#dc2626' : '#f59e0b';
         const label = isPothole ? 'Lubang' : 'Polisi Tidur';
 
@@ -460,18 +477,19 @@ async function renderRoadEvents(events) {
                 iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
             });
         } else {
-            // 🔧 2. CARI SUDUT DARI JEJAK MOTOR
+            // Hitung Sudut (Bearing)
             let angle = 0;
             if (tracks.length > 1) {
                 let minDist = Infinity;
                 let closestIdx = 0;
                 for (let j = 0; j < tracks.length; j++) {
-                    const d = haversine(lat, lng, tracks[j].latitude, tracks[j].longitude);
+                    const d = haversine(snapped.lat, snapped.lng, tracks[j].latitude, tracks[j].longitude);
                     if (d < minDist) { minDist = d; closestIdx = j; }
                 }
                 
-                const p1 = tracks[Math.max(0, closestIdx - 4)];
-                const p2 = tracks[Math.min(tracks.length - 1, closestIdx + 4)];
+                // 🔧 Ambil jendela lebih lebar (-10 sampai +10) agar rotasi tidak kaku/goyang
+                const p1 = tracks[Math.max(0, closestIdx - 10)];
+                const p2 = tracks[Math.min(tracks.length - 1, closestIdx + 10)];
                 
                 if (p1 && p2 && p1 !== p2) {
                     angle = calculateBearing(p1.latitude, p1.longitude, p2.latitude, p2.longitude);
@@ -512,14 +530,6 @@ async function renderRoadEvents(events) {
 
     globalEventCount = roadEventMarkers.length;
     updateMapStats();
-}
-
-function listenRoadEvents() {
-    if (typeof db === 'undefined') return;
-    db.ref('road_events').on('value', (snap) => {
-        const data = snap.val() || {};
-        renderRoadEvents(data);
-    });
 }
 
 // ============================================================
