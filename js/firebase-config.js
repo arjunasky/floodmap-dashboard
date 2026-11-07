@@ -48,6 +48,17 @@ function clearCurrentReading() {
 }
 
 // ============================================================
+// FITUR HAPUS DATA INDIVIDU (BARU)
+// ============================================================
+function deleteSensorLog(key) {
+  return db.ref('sensor_logs/' + key).remove();
+}
+
+function deleteRoadEvent(key) {
+  return db.ref('road_events/' + key).remove();
+}
+
+// ============================================================
 // CONNECTION STATUS
 // ============================================================
 
@@ -75,17 +86,6 @@ function onSensorLogsOnce(callback) {
   db.ref('sensor_logs').limitToLast(1000).once('value').then((snap) => {
       callback(snap.val() || {});
   });
-}
-// ============================================================
-// FITUR HAPUS DATA
-// ============================================================
-
-function deleteSensorLog(key) {
-  return db.ref('sensor_logs/' + key).remove();
-}
-
-function deleteRoadEvent(key) {
-  return db.ref('road_events/' + key).remove();
 }
 
 console.log('✅ firebase-config.js loaded');

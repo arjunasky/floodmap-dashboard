@@ -493,13 +493,14 @@ function applyLogsFilter() {
     const filterStatus = document.getElementById('logsFilterStatus')?.value || 'all';
     const filterSource = document.getElementById('logsFilterSource')?.value || 'all';
 
+    // 🔧 GUNAKAN Object.entries AGAR MENDAPATKAN KEY FIREBASE
     filteredLogsData = Object.entries(currentLogsData || {})
-    .map(([key, log]) => ({
-        ...log,
-        _key: key, // 🔧 Simpan Firebase key untuk fitur hapus
-        _depth: parseFloat(log.depth) || 0,
-        _timestamp: parseFloat(log.timestamp) || 0
-    }))
+        .map(([key, log]) => ({
+            ...log,
+            _key: key, // Simpan key untuk hapus
+            _depth: parseFloat(log.depth) || 0,
+            _timestamp: parseFloat(log.timestamp) || 0
+        }))
         .filter(log => {
             if (filterStatus !== 'all' && (log.status || '').toLowerCase() !== filterStatus) return false;
             if (filterSource !== 'all' && (log.source || '').toLowerCase() !== filterSource) return false;
@@ -556,7 +557,8 @@ function renderLogsTable() {
             <td>${roll.toFixed(1)}°</td>
             <td style="font-size:10px;">${segment}</td>
             <td><span class="sub-badge">${log.source || '-'}</span></td>
-            <td>
+            <!-- 🔧 TOMBOL HAPUS DITAMBAHKAN DI SINI -->
+            <td style="text-align:center;">
                 <button class="btn-icon" onclick="hapusLogSensor('${log._key}')" title="Hapus data ini">
                     <i class="ti ti-trash"></i>
                 </button>
@@ -886,6 +888,7 @@ function updateEventsTable(events) {
     const tb = document.getElementById('eventsTableBody');
     if (!tb) return;
 
+    // 🔧 Gunakan Object.entries agar dapat Key untuk hapus
     const arr = Object.entries(events || {});
     if (arr.length === 0) {
         tb.innerHTML = '<tr><td colspan="7" class="empty">Belum ada event</td></tr>';
@@ -908,7 +911,8 @@ function updateEventsTable(events) {
             <td style="font-size:11px;">
                 ${(parseFloat(e.latitude)||0).toFixed(5)}, ${(parseFloat(e.longitude)||0).toFixed(5)}
             </td>
-            <td>
+            <!-- 🔧 TOMBOL HAPUS DITAMBAHKAN -->
+            <td style="text-align:center;">
                 <button class="btn-icon" onclick="hapusEventJalan('${key}')" title="Hapus event ini">
                     <i class="ti ti-trash"></i>
                 </button>
@@ -961,8 +965,9 @@ function downloadFile(content, filename, type) {
     link.download = filename;
     link.click();
 }
+
 // ============================================================
-// FUNGSI HAPUS DATA (GLOBAL)
+// FUNGSI HAPUS DATA GLOBAL (BARU)
 // ============================================================
 window.hapusLogSensor = function(key) {
     if (confirm('⚠️ Hapus data sensor log ini secara permanen?')) {
