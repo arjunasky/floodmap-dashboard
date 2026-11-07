@@ -474,7 +474,7 @@ function updatePolylineWeights() {
 }
 
 // ============================================================
-// 8. ROAD EVENTS MARKER (PERBAIKAN CAKAR HARIMAU & SUDUT)
+// 8. ROAD EVENTS MARKER (BULAT: MERAH & UNGU)
 // ============================================================
 function initRoadEventLayer(mapInstance) {
     if (!mapInstance) return;
@@ -498,12 +498,7 @@ async function renderRoadEvents(events) {
     }
 
     const sortedEvents = Object.entries(events).sort((a, b) => a[1].timestamp - b[1].timestamp);
-    
-    // 🔧 Tarik data garis jalan OSRM untuk sudut
-    const pointsForMatch = sortedEvents.map(([k, ev]) => ({ latitude: parseFloat(ev.latitude), longitude: parseFloat(ev.longitude) }));
-    const roadMatch = await matchToRoad(pointsForMatch);
-
-    const placedEvents = []; // 🔧 Mencegah penumpukan gambar
+    const placedEvents = []; 
 
     for (let i = 0; i < sortedEvents.length; i++) {
         const [key, ev] = sortedEvents[i];
@@ -513,10 +508,10 @@ async function renderRoadEvents(events) {
         const lng = parseFloat(ev.longitude);
         if (isNaN(lat) || isNaN(lng)) continue;
 
-        // 🔧 1. ANTI-MULTIPLY (Jarak < 15 meter dianggap sama)
+        // 🔧 1. ANTI-MULTIPLY (Jarak < 20 meter diabaikan)
         let isDuplicate = false;
         for (const placed of placedEvents) {
-            if (haversine(lat, lng, placed.lat, placed.lng) < 15.0) {
+            if (haversine(lat, lng, placed.lat, placed.lng) < 20.0) {
                 isDuplicate = true; 
                 break; 
             }
@@ -526,7 +521,9 @@ async function renderRoadEvents(events) {
 
         const snapped = await snapMarkerToRoad(lat, lng, 'event_' + key);
         const isPothole = ev.event_type === 'pothole';
-        const color = isPothole ? '#dc2626' : '#f59e0b';
+        
+        // 🔧 WARNA: MERAH (Lubang) vs UNGU (Polisi Tidur)
+        const color = isPothole ? '#dc2626' : '#8b5cf6'; 
         const label = isPothole ? 'Lubang' : 'Polisi Tidur';
 
         let icon;
@@ -537,28 +534,11 @@ async function renderRoadEvents(events) {
                 iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
             });
         } else {
-            // 🔧 2. SUDUT DARI GARIS JALAN
-            let angle = 0;
-            if (roadMatch.geometry && roadMatch.geometry.length > 1) {
-                let minDist = Infinity;
-                let closestIdx = 0;
-                for (let j = 0; j < roadMatch.geometry.length; j++) {
-                    const d = haversine(lat, lng, roadMatch.geometry[j].lat, roadMatch.geometry[j].lng);
-                    if (d < minDist) { minDist = d; closestIdx = j; }
-                }
-                
-                const p1 = roadMatch.geometry[Math.max(0, closestIdx - 1)];
-                const p2 = roadMatch.geometry[Math.min(roadMatch.geometry.length - 1, closestIdx + 1)];
-                
-                if (p1 !== p2) {
-                    angle = calculateBearing(p1.lat, p1.lng, p2.lat, p2.lng);
-                }
-            }
-
+            // 🔧 Polisi Tidur: Marker Bulat Ungu dengan ikon garis melintang
             icon = L.divIcon({
-                className: 'custom-bump-marker',
-                html: `<div class="event-bump-bar" style="transform: rotate(${angle}deg);"></div>`,
-                iconSize: [60, 16], iconAnchor: [30, 8], popupAnchor: [0, -8]
+                className: 'custom-event-marker',
+                html: `<div class="event-pin event-bump"><i class="ti ti-arrows-horizontal"></i></div>`,
+                iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
             });
         }
 
