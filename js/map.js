@@ -373,7 +373,7 @@ async function redrawMapFromData(allData, segmentsData, offRoadData) {
     }
 
     // 🔧 Hitung jumlah Pin yang tampil, bukan data mentah
-    globalFloodCount = segmentsData.length; 
+    globalFloodCount = Object.keys(segmentMarkers).length;
     globalOffRoadCount = offRoadData.length;
     updateMapStats();
 }
