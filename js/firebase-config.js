@@ -48,7 +48,7 @@ function clearCurrentReading() {
 }
 
 // ============================================================
-// FITUR HAPUS DATA INDIVIDU (BARU)
+// FITUR HAPUS DATA INDIVIDU
 // ============================================================
 function deleteSensorLog(key) {
   return db.ref('sensor_logs/' + key).remove();
@@ -56,6 +56,20 @@ function deleteSensorLog(key) {
 
 function deleteRoadEvent(key) {
   return db.ref('road_events/' + key).remove();
+}
+
+// 🔧 FITUR HAPUS MASSAL BERDASARKAN SEGMEN (AUTO-DELETE)
+function deleteFloodPointsBySegment(segmentIds) {
+    const promises = segmentIds.map(id => {
+        if(id === 'unknown' || id === '') return Promise.resolve();
+        return db.ref('flood_points').orderByChild('segment_id').equalTo(id).once('value')
+            .then(snapshot => {
+                const updates = {};
+                snapshot.forEach(child => { updates[child.key] = null; });
+                return db.ref('flood_points').update(updates);
+            });
+    });
+    return Promise.all(promises);
 }
 
 // ============================================================

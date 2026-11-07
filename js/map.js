@@ -1,6 +1,6 @@
 // ============================================================
 // MAP.JS — Leaflet OpenStreetMap
-// Polyline mengikuti jalan + lebar dinamis + 1 marker per segment
+// Marker Geotagging presisi + Snap to Road (OSRM)
 // ============================================================
 
 let map = null;
@@ -49,6 +49,35 @@ function getWeightPixels(lat, zoom, widthMeters) {
     if (w < 3) w = 3;
     if (w > 50) w = 50;
     return w;
+}
+
+// ============================================================
+// 🔧 SNAP TO ROAD (OSRM NEAREST) — Untuk Marker Presisi
+// ============================================================
+const snappedMarkerCache = {};
+
+async function snapMarkerToRoad(lat, lng, segmentId) {
+    if (snappedMarkerCache[segmentId]) return snappedMarkerCache[segmentId];
+    try {
+        const res = await fetch(`https://router.project-osrm.org/nearest/v1/driving/${lng},${lat}?number=1`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.waypoints && data.waypoints.length > 0) {
+                const snapped = { 
+                    lat: data.waypoints[0].location[1], 
+                    lng: data.waypoints[0].location[0], 
+                    distance: data.waypoints[0].distance 
+                };
+                snappedMarkerCache[segmentId] = snapped;
+                return snapped;
+            }
+        }
+    } catch (e) { 
+        console.warn('Snap to road gagal, pakai koordinat asli:', e.message); 
+    }
+    const fallback = { lat: lat, lng: lng, distance: 0 };
+    snappedMarkerCache[segmentId] = fallback;
+    return fallback;
 }
 
 // ============================================================
@@ -139,7 +168,7 @@ function smoothPath(points) {
 }
 
 // ============================================================
-// 4. ROAD MATCHING — OSRM
+// 4. ROAD MATCHING — OSRM (Matching Polyline)
 // ============================================================
 const roadMatchCache = {};
 
@@ -215,7 +244,7 @@ async function matchToRoad(points) {
 }
 
 // ============================================================
-// 5. BUILD SEGMENTS
+// 5. BUILD SEGMENTS (Untuk Polyline)
 // ============================================================
 function buildPolylineSegments(points) {
     if (points.length < 2) return [];
@@ -252,7 +281,7 @@ function buildPolylineSegments(points) {
 }
 
 // ============================================================
-// 6. REDRAW MAP
+// 6. REDRAW MAP (Marker Focus)
 // ============================================================
 async function redrawMapFromData(allData, floodData, offRoadData) {
     if (!map || !floodLayerGroup) return;
@@ -267,7 +296,9 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     segmentPolylines = {};
     totalDistance = 0;
 
-    // ---- RENDER POLYLINE ----
+    // ---- RENDER POLYLINE (DINONAKTIFKAN KARENA FOKUS KE MARKER) ----
+    // Jika suatu saat ingin diaktifkan, hapus komentar (//) pada blok di bawah ini.
+    /*
     if (floodData.length >= 2) {
         const groupBySeg = {};
         floodData.forEach(p => {
@@ -340,12 +371,15 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
             }
         }
     }
+    */
 
-    // ---- 🔧 MARKER PER SEGMENT (1 segment = 1 titik) ----
+    // ---- 🔧 MARKER PER SEGMENT (1 segment = 1 titik geotag) ----
     const segmentMarkers = {};
-    floodData.forEach(p => {
+    
+    // Gunakan for...of agar bisa await snapMarkerToRoad
+    for (const p of floodData) {
         const sid = p.segment_id || 'unknown';
-        if (segmentMarkers[sid]) return;
+        if (segmentMarkers[sid]) continue;
 
         const segPoints = floodData.filter(x => x.segment_id === sid);
         const avgDepth = segPoints.reduce((s, x) => s + (x.depth || 0), 0) / segPoints.length;
@@ -353,39 +387,52 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         const cat = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
         const color = MAP_CONFIG.colors[cat];
 
-        const centerLat = segPoints.reduce((s, x) => s + x.latitude, 0) / segPoints.length;
-        const centerLng = segPoints.reduce((s, x) => s + x.longitude, 0) / segPoints.length;
+        // Ambil titik median (tengah dari genangan)
+        const midIdx = Math.floor(segPoints.length / 2);
+        const baseLat = segPoints[midIdx].latitude;
+        const baseLng = segPoints[midIdx].longitude;
 
+        // Tarik ke jalan terdekat
+        const snapped = await snapMarkerToRoad(baseLat, baseLng, sid);
+        const finalLat = snapped.lat; 
+        const finalLng = snapped.lng; 
+        const gpsError = snapped.distance;
+
+        let lengthM = 0;
+        for (let i = 1; i < segPoints.length; i++) {
+            lengthM += haversine(segPoints[i-1].latitude, segPoints[i-1].longitude, segPoints[i].latitude, segPoints[i].longitude);
+        }
+
+        // 🔧 Desain Pin Custom
         const icon = L.divIcon({
-            className: 'segment-marker',
-            html: `<div style="
-                background: ${color};
-                width: 28px; height: 28px;
-                border-radius: 50%;
-                border: 3px solid #fff;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                display: flex; align-items: center; justify-content: center;
-                font-size: 11px; font-weight: 700; color: #fff;
-            ">${segPoints.length}</div>`,
-            iconSize: [28, 28],
-            iconAnchor: [14, 14]
+            className: 'custom-flood-marker',
+            html: `<div class="pin pin-${cat}"><div class="pin-value">${Math.round(avgDepth)}</div><div class="pin-pulse"></div></div>`,
+            iconSize: [40, 50], 
+            iconAnchor: [20, 50], 
+            popupAnchor: [0, -50]
         });
 
-        const marker = L.marker([centerLat, centerLng], { icon });
+        const marker = L.marker([finalLat, finalLng], { icon });
 
         marker.bindPopup(`
-            <div style="font-family:Inter; font-size:12px; min-width:180px;">
-                <strong style="color:${color}; font-size:13px;">● ${cat.toUpperCase()}</strong><br>
-                <strong>Segmen:</strong> ${sid}<br>
-                <strong>Titik GPS:</strong> ${segPoints.length}<br>
-                <strong>Depth rata:</strong> ${avgDepth.toFixed(1)} cm<br>
-                <strong>Depth max:</strong> ${maxDepth.toFixed(1)} cm
+            <div style="font-family:Inter; font-size:12px; min-width:240px;">
+                <div style="background:${color}; color:white; padding:6px 10px; border-radius:6px; font-weight:bold; margin-bottom:8px; text-align:center; font-size:13px;">
+                    📍 GEOTAG: ${cat.toUpperCase()}
+                </div>
+                <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Koordinat Jalan</td><td style="font-weight:bold; font-family:monospace; text-align:right;">${finalLat.toFixed(6)}, ${finalLng.toFixed(6)}</td></tr>
+                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Akurasi Snap</td><td style="font-weight:bold; color:${gpsError < 10 ? '#22c55e' : '#f59e0b'}; text-align:right;">± ${gpsError.toFixed(1)} m</td></tr>
+                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Panjang Genangan</td><td style="font-weight:bold; text-align:right;">${lengthM > 0 ? lengthM.toFixed(1) + ' m' : 'Titik Tunggal'}</td></tr>
+                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Depth Rata-rata</td><td style="font-weight:bold; color:${color}; text-align:right;">${avgDepth.toFixed(1)} cm</td></tr>
+                    <tr style="border-bottom:1px dashed #eee;"><td style="padding:6px 0; color:#64748b;">Depth Maksimal</td><td style="font-weight:bold; color:#ef4444; text-align:right;">${maxDepth.toFixed(1)} cm</td></tr>
+                    <tr><td style="padding:6px 0; color:#64748b;">Titik Sensor</td><td style="text-align:right;">${segPoints.length} tag</td></tr>
+                </table>
             </div>
         `);
 
         floodLayerGroup.addLayer(marker);
         segmentMarkers[sid] = marker;
-    });
+    }
 
     // ---- VEHICLE MARKER ----
     if (allData && allData.length > 0) {
@@ -407,7 +454,7 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
 }
 
 // ============================================================
-// 7. UPDATE WIDTH saat zoom
+// 7. UPDATE WIDTH saat zoom (Untuk Polyline)
 // ============================================================
 function updatePolylineWeights() {
     if (!map) return;
@@ -427,7 +474,7 @@ function initRoadEventLayer(mapInstance) {
     roadEventLayerGroup = L.layerGroup().addTo(mapInstance);
 }
 
-function renderRoadEvents(events) {
+async function renderRoadEvents(events) {
     if (!roadEventLayerGroup) return;
 
     roadEventLayerGroup.clearLayers();
@@ -435,40 +482,36 @@ function renderRoadEvents(events) {
 
     if (!events || Object.keys(events).length === 0) return;
 
-    const entries = Object.values(events).sort((a, b) => a.timestamp - b.timestamp);
+    const entries = Object.entries(events).sort((a, b) => a[1].timestamp - b[1].timestamp);
 
-    entries.forEach(ev => {
-        if (ev.latitude === undefined || ev.longitude === undefined) return;
+    for (const [key, ev] of entries) {
+        if (ev.latitude === undefined || ev.longitude === undefined) continue;
 
         const lat = parseFloat(ev.latitude);
         const lng = parseFloat(ev.longitude);
-        if (isNaN(lat) || isNaN(lng)) return;
+        if (isNaN(lat) || isNaN(lng)) continue;
 
+        // 🔧 Tarik event ke jalan terdekat
+        const snapped = await snapMarkerToRoad(lat, lng, 'event_' + key);
+        
         const isPothole = ev.event_type === 'pothole';
         const color = isPothole ? '#dc2626' : '#f59e0b';
-        const emoji = isPothole ? '🕳️' : '🚧';
         const label = isPothole ? 'Lubang' : 'Polisi Tidur';
 
+        // 🔧 Desain Ikon Vektor (Tabler Icons)
         const icon = L.divIcon({
-            className: 'road-event-marker',
-            html: `<div style="
-                background:${color};
-                width:32px; height:32px;
-                border-radius:50%;
-                border:3px solid #fff;
-                box-shadow:0 2px 10px rgba(0,0,0,0.35);
-                display:flex; align-items:center; justify-content:center;
-                font-size:16px;
-            ">${emoji}</div>`,
-            iconSize: [32, 32],
-            iconAnchor: [16, 16]
+            className: 'custom-event-marker',
+            html: `<div class="event-pin event-${isPothole ? 'pothole' : 'bump'}"><i class="ti ti-${isPothole ? 'alert-octagon' : 'arrow-big-up-lines'}"></i></div>`,
+            iconSize: [36, 36], 
+            iconAnchor: [18, 18], 
+            popupAnchor: [0, -18]
         });
 
-        const marker = L.marker([lat, lng], { icon });
+        const marker = L.marker([snapped.lat, snapped.lng], { icon });
 
         marker.bindPopup(`
             <div style="font-family:Inter; font-size:12px; min-width:180px;">
-                <strong style="color:${color}; font-size:14px;">${emoji} ${label}</strong>
+                <strong style="color:${color}; font-size:14px;">${label}</strong>
                 <hr style="margin:6px 0; border:none; border-top:1px solid #e2e8f0;">
                 <table style="width:100%; font-size:11px;">
                     <tr><td><strong>Kekuatan:</strong></td><td>${(parseFloat(ev.magnitude_g)||0).toFixed(2)} g</td></tr>
@@ -480,7 +523,7 @@ function renderRoadEvents(events) {
 
         roadEventLayerGroup.addLayer(marker);
         roadEventMarkers.push({ marker, data: ev, type: ev.event_type });
-    });
+    }
 }
 
 function listenRoadEvents() {

@@ -158,6 +158,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = (reading.status || 'aman').toLowerCase();
         const source = reading.source || 'fallback';
 
+        // 🔧 AUTO DELETE (DETEKSI SURUT) DITAMBAHKAN DI SINI
+        if (depth < DRY_THRESHOLD && lat !== 0 && lng !== 0 && source === 'gps' && sats >= 4) {
+            if (currentFloodSegments && currentFloodSegments.length > 0) {
+                currentFloodSegments.forEach(seg => {
+                    const dist = haversine(lat, lng, seg.centerLat, seg.centerLng);
+                    if (dist <= 40.0) { // Dalam radius 40m
+                        if (!window._deletingSegments) window._deletingSegments = {};
+                        if (!window._deletingSegments[seg.segment_id]) {
+                            window._deletingSegments[seg.segment_id] = true;
+                            const idsToDelete = seg.segment_id.split(', ');
+                            deleteFloodPointsBySegment(idsToDelete).then(() => {
+                                setTimeout(() => { delete window._deletingSegments[seg.segment_id]; }, 5000);
+                            });
+                        }
+                    }
+                });
+            }
+        }
+
         const depthEl = document.getElementById('currentDepth');
         if (depthEl) {
             depthEl.textContent = depth.toFixed(1) + ' cm';
@@ -303,68 +322,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ============================================================
 // GROUP FLOOD POINTS → SEGMENTS (1 segment = 1 titik flood)
+// 🔧 REVISI: SPATIAL CLUSTERING 40 METER
 // ============================================================
 function groupFloodSegments(floodData) {
     if (!floodData || floodData.length === 0) return [];
 
-    const grouped = {};
+    const clusters = [];
     floodData.forEach(p => {
-        const sid = p.segment_id || 'unknown';
-        if (!grouped[sid]) {
-            grouped[sid] = {
-                segment_id: sid,
-                points: [],
-                minLat: p.latitude,
-                maxLat: p.latitude,
-                minLng: p.longitude,
-                maxLng: p.longitude,
-                sumDepth: 0,
-                maxDepth: 0,
-                firstTimestamp: p.timestamp,
-                lastTimestamp: p.timestamp,
-                source: p.source
-            };
+        let matchedCluster = null;
+        for (const c of clusters) {
+            if (haversine(p.latitude, p.longitude, c.centerLat, c.centerLng) <= 40.0) { 
+                matchedCluster = c; 
+                break; 
+            }
         }
-
-        const g = grouped[sid];
-        g.points.push(p);
-        g.sumDepth += p.depth || 0;
-        if (p.depth > g.maxDepth) g.maxDepth = p.depth;
-        if (p.latitude < g.minLat) g.minLat = p.latitude;
-        if (p.latitude > g.maxLat) g.maxLat = p.latitude;
-        if (p.longitude < g.minLng) g.minLng = p.longitude;
-        if (p.longitude > g.maxLng) g.maxLng = p.longitude;
-        if (p.timestamp < g.firstTimestamp) g.firstTimestamp = p.timestamp;
-        if (p.timestamp > g.lastTimestamp) g.lastTimestamp = p.timestamp;
+        if (matchedCluster) {
+            matchedCluster.points.push(p);
+            matchedCluster.sumDepth += p.depth || 0;
+            if (p.depth > matchedCluster.maxDepth) matchedCluster.maxDepth = p.depth;
+            matchedCluster.minLat = Math.min(matchedCluster.minLat, p.latitude); 
+            matchedCluster.maxLat = Math.max(matchedCluster.maxLat, p.latitude);
+            matchedCluster.minLng = Math.min(matchedCluster.minLng, p.longitude); 
+            matchedCluster.maxLng = Math.max(matchedCluster.maxLng, p.longitude);
+            matchedCluster.firstTimestamp = Math.min(matchedCluster.firstTimestamp, p.timestamp); 
+            matchedCluster.lastTimestamp = Math.max(matchedCluster.lastTimestamp, p.timestamp);
+            matchedCluster.centerLat = (matchedCluster.minLat + matchedCluster.maxLat) / 2;
+            matchedCluster.centerLng = (matchedCluster.minLng + matchedCluster.maxLng) / 2;
+            matchedCluster.segment_ids.add(p.segment_id || 'unknown');
+        } else {
+            clusters.push({
+                segment_ids: new Set([p.segment_id || 'unknown']), 
+                points: [p],
+                minLat: p.latitude, maxLat: p.latitude, minLng: p.longitude, maxLng: p.longitude,
+                centerLat: p.latitude, centerLng: p.longitude, sumDepth: p.depth || 0, maxDepth: p.depth || 0,
+                firstTimestamp: p.timestamp, lastTimestamp: p.timestamp, source: p.source
+            });
+        }
     });
 
-    return Object.values(grouped).map(g => {
+    return clusters.map(g => {
         const avgDepth = g.sumDepth / g.points.length;
         const category = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
-        const centerLat = (g.minLat + g.maxLat) / 2;
-        const centerLng = (g.minLng + g.maxLng) / 2;
-
-        let lengthM = 0;
-        for (let i = 1; i < g.points.length; i++) {
-            const a = g.points[i - 1];
-            const b = g.points[i];
-            lengthM += haversine(a.latitude, a.longitude, b.latitude, b.longitude);
+        let lengthM = 0; 
+        const sortedPoints = g.points.sort((a, b) => a.timestamp - b.timestamp);
+        for (let i = 1; i < sortedPoints.length; i++) {
+            lengthM += haversine(sortedPoints[i-1].latitude, sortedPoints[i-1].longitude, sortedPoints[i].latitude, sortedPoints[i].longitude);
         }
-
         return {
-            segment_id: g.segment_id,
+            segment_id: Array.from(g.segment_ids).join(', '), 
             pointCount: g.points.length,
-            avgDepth: Math.round(avgDepth * 10) / 10,
-            maxDepth: Math.round(g.maxDepth * 10) / 10,
+            avgDepth: Math.round(avgDepth * 10) / 10, 
+            maxDepth: Math.round(g.maxDepth * 10) / 10, 
             category: category,
-            centerLat: centerLat,
-            centerLng: centerLng,
-            firstTimestamp: g.firstTimestamp,
-            lastTimestamp: g.lastTimestamp,
-            durationSec: Math.round((g.lastTimestamp - g.firstTimestamp) / 1000),
+            centerLat: g.centerLat, centerLng: g.centerLng, 
+            firstTimestamp: g.firstTimestamp, lastTimestamp: g.lastTimestamp,
+            durationSec: Math.round((g.lastTimestamp - g.firstTimestamp) / 1000), 
             lengthM: Math.round(lengthM * 10) / 10,
-            source: g.source,
-            points: g.points
+            source: g.source, points: sortedPoints
         };
     }).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 }
@@ -380,9 +394,7 @@ function haversine(lat1, lng1, lat2, lng2) {
     return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// ============================================================
-// CLEAR SENSOR READOUT
-// ============================================================
+// (SISA KODE APP.JS DI BAWAH INI TETAP SAMA PERSIS SEPERTI ASLINYA)
 function clearSensorReadout() {
     const depthEl = document.getElementById('currentDepth');
     if (depthEl) {
@@ -398,9 +410,6 @@ function clearSensorReadout() {
     }
 }
 
-// ============================================================
-// FORCE OFFLINE
-// ============================================================
 function forceOfflineStatus() {
     const ind = document.getElementById('espIndicator');
     if (ind) {
@@ -416,9 +425,6 @@ function forceOfflineStatus() {
     clearSensorReadout();
 }
 
-// ============================================================
-// LEGEND TOGGLE
-// ============================================================
 function setupLegendToggle() {
     const legend = document.getElementById('mapLegend');
     const toggle = document.getElementById('legendToggle');
@@ -436,9 +442,6 @@ function setupLegendToggle() {
     if (window.innerWidth <= 768 && savedState === null) legend.classList.add('collapsed');
 }
 
-// ============================================================
-// SENSOR LOGS HANDLERS
-// ============================================================
 function setupSensorLogsHandlers() {
     const searchInput = document.getElementById('logsSearch');
     if (searchInput) {
@@ -479,9 +482,6 @@ function setupSensorLogsHandlers() {
     if (btnExcel) btnExcel.addEventListener('click', () => exportLogsExcel());
 }
 
-// ============================================================
-// SENSOR LOGS UI
-// ============================================================
 function updateSensorLogsUI(logsData) {
     currentLogsData = logsData;
     applyLogsFilter();
@@ -493,11 +493,10 @@ function applyLogsFilter() {
     const filterStatus = document.getElementById('logsFilterStatus')?.value || 'all';
     const filterSource = document.getElementById('logsFilterSource')?.value || 'all';
 
-    // 🔧 GUNAKAN Object.entries AGAR MENDAPATKAN KEY FIREBASE
     filteredLogsData = Object.entries(currentLogsData || {})
         .map(([key, log]) => ({
             ...log,
-            _key: key, // Simpan key untuk hapus
+            _key: key, 
             _depth: parseFloat(log.depth) || 0,
             _timestamp: parseFloat(log.timestamp) || 0
         }))
@@ -557,7 +556,6 @@ function renderLogsTable() {
             <td>${roll.toFixed(1)}°</td>
             <td style="font-size:10px;">${segment}</td>
             <td><span class="sub-badge">${log.source || '-'}</span></td>
-            <!-- 🔧 TOMBOL HAPUS DITAMBAHKAN DI SINI -->
             <td style="text-align:center;">
                 <button class="btn-icon" onclick="hapusLogSensor('${log._key}')" title="Hapus data ini">
                     <i class="ti ti-trash"></i>
@@ -600,9 +598,6 @@ function updateLogsStats() {
     }
 }
 
-// ============================================================
-// SENSOR LOGS EXPORT
-// ============================================================
 function exportLogsCSV() {
     const data = filteredLogsData;
     if (data.length === 0) { alert('Tidak ada data untuk diexport'); return; }
@@ -679,9 +674,6 @@ function formatDateForFile() {
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
 
-// ============================================================
-// NAVIGATION
-// ============================================================
 function setupNavigation() {
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('sidebarOverlay');
@@ -747,9 +739,6 @@ function setupNavigation() {
     });
 }
 
-// ============================================================
-// SETTINGS
-// ============================================================
 function setupSettings() {
     const btn = document.getElementById('btnSaveSettings');
     if (!btn) return;
@@ -768,9 +757,6 @@ function setupSettings() {
     });
 }
 
-// ============================================================
-// ADMIN PANEL
-// ============================================================
 let adminUnlocked = false;
 let adminClickCount = 0;
 let adminClickTimer = null;
@@ -862,9 +848,6 @@ function setupAdminPanel() {
     if (btnLock) btnLock.addEventListener('click', () => lockAdmin());
 }
 
-// ============================================================
-// RESET TAMPILAN
-// ============================================================
 function resetViewOnly() {
     if (typeof map !== 'undefined' && map) map.setView(MAP_CONFIG.center, MAP_CONFIG.zoom);
     if (typeof floodLayerGroup !== 'undefined' && floodLayerGroup) floodLayerGroup.clearLayers();
@@ -881,14 +864,10 @@ function resetViewOnly() {
     if (notif) notif.innerHTML = '<div class="notif-item info">Tampilan direset</div>';
 }
 
-// ============================================================
-// EVENTS TABLE
-// ============================================================
 function updateEventsTable(events) {
     const tb = document.getElementById('eventsTableBody');
     if (!tb) return;
 
-    // 🔧 Gunakan Object.entries agar dapat Key untuk hapus
     const arr = Object.entries(events || {});
     if (arr.length === 0) {
         tb.innerHTML = '<tr><td colspan="7" class="empty">Belum ada event</td></tr>';
@@ -911,7 +890,6 @@ function updateEventsTable(events) {
             <td style="font-size:11px;">
                 ${(parseFloat(e.latitude)||0).toFixed(5)}, ${(parseFloat(e.longitude)||0).toFixed(5)}
             </td>
-            <!-- 🔧 TOMBOL HAPUS DITAMBAHKAN -->
             <td style="text-align:center;">
                 <button class="btn-icon" onclick="hapusEventJalan('${key}')" title="Hapus event ini">
                     <i class="ti ti-trash"></i>
@@ -923,9 +901,6 @@ function updateEventsTable(events) {
     setText('eventCount', `(${arr.length} entri)`);
 }
 
-// ============================================================
-// EXPORT BUTTONS (Events)
-// ============================================================
 function setupExportButtons() {
     const csv = document.getElementById('btnExportEventsCSV');
     if (csv) {
@@ -966,9 +941,6 @@ function downloadFile(content, filename, type) {
     link.click();
 }
 
-// ============================================================
-// FUNGSI HAPUS DATA GLOBAL (BARU)
-// ============================================================
 window.hapusLogSensor = function(key) {
     if (confirm('⚠️ Hapus data sensor log ini secara permanen?')) {
         deleteSensorLog(key)
@@ -985,9 +957,6 @@ window.hapusEventJalan = function(key) {
     }
 };
 
-// ============================================================
-// EXPORT GLOBAL
-// ============================================================
 window.APP = APP;
 window.initMap = initMap;
 window.resetViewOnly = resetViewOnly;
