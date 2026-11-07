@@ -493,12 +493,13 @@ function applyLogsFilter() {
     const filterStatus = document.getElementById('logsFilterStatus')?.value || 'all';
     const filterSource = document.getElementById('logsFilterSource')?.value || 'all';
 
-    filteredLogsData = Object.values(currentLogsData || {})
-        .map(log => ({
-            ...log,
-            _depth: parseFloat(log.depth) || 0,
-            _timestamp: parseFloat(log.timestamp) || 0
-        }))
+    filteredLogsData = Object.entries(currentLogsData || {})
+    .map(([key, log]) => ({
+        ...log,
+        _key: key, // 🔧 Simpan Firebase key untuk fitur hapus
+        _depth: parseFloat(log.depth) || 0,
+        _timestamp: parseFloat(log.timestamp) || 0
+    }))
         .filter(log => {
             if (filterStatus !== 'all' && (log.status || '').toLowerCase() !== filterStatus) return false;
             if (filterSource !== 'all' && (log.source || '').toLowerCase() !== filterSource) return false;
@@ -520,7 +521,7 @@ function renderLogsTable() {
     const countEl = document.getElementById('logsCount');
 
     if (filteredLogsData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="14" class="empty">Tidak ada data</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="15" class="empty">Tidak ada data</td></tr>';
         if (countEl) countEl.textContent = '(0 entri)';
         return;
     }
@@ -555,6 +556,11 @@ function renderLogsTable() {
             <td>${roll.toFixed(1)}°</td>
             <td style="font-size:10px;">${segment}</td>
             <td><span class="sub-badge">${log.source || '-'}</span></td>
+            <td>
+                <button class="btn-icon" onclick="hapusLogSensor('${log._key}')" title="Hapus data ini">
+                    <i class="ti ti-trash"></i>
+                </button>
+            </td>
         </tr>`;
     }).join('');
 
@@ -880,15 +886,15 @@ function updateEventsTable(events) {
     const tb = document.getElementById('eventsTableBody');
     if (!tb) return;
 
-    const arr = Object.values(events || {});
+    const arr = Object.entries(events || {});
     if (arr.length === 0) {
-        tb.innerHTML = '<tr><td colspan="6" class="empty">Belum ada event</td></tr>';
+        tb.innerHTML = '<tr><td colspan="7" class="empty">Belum ada event</td></tr>';
         setText('eventCount', '(0 entri)');
         return;
     }
 
-    const sorted = arr.sort((a, b) => b.timestamp - a.timestamp);
-    tb.innerHTML = sorted.map((e, i) => {
+    const sorted = arr.sort((a, b) => b[1].timestamp - a[1].timestamp);
+    tb.innerHTML = sorted.map(([key, e], i) => {
         const isPothole = e.event_type === 'pothole';
         const emoji = isPothole ? '🕳️' : '🚧';
         const label = isPothole ? 'Lubang' : 'Polisi Tidur';
@@ -901,6 +907,11 @@ function updateEventsTable(events) {
             <td>${(parseFloat(e.z_axis_g) || 0).toFixed(2)} g</td>
             <td style="font-size:11px;">
                 ${(parseFloat(e.latitude)||0).toFixed(5)}, ${(parseFloat(e.longitude)||0).toFixed(5)}
+            </td>
+            <td>
+                <button class="btn-icon" onclick="hapusEventJalan('${key}')" title="Hapus event ini">
+                    <i class="ti ti-trash"></i>
+                </button>
             </td>
         </tr>`;
     }).join('');
@@ -950,6 +961,24 @@ function downloadFile(content, filename, type) {
     link.download = filename;
     link.click();
 }
+// ============================================================
+// FUNGSI HAPUS DATA (GLOBAL)
+// ============================================================
+window.hapusLogSensor = function(key) {
+    if (confirm('⚠️ Hapus data sensor log ini secara permanen?')) {
+        deleteSensorLog(key)
+            .then(() => alert('✅ Log sensor berhasil dihapus!'))
+            .catch(err => alert('❌ Gagal menghapus: ' + err.message));
+    }
+};
+
+window.hapusEventJalan = function(key) {
+    if (confirm('⚠️ Hapus event jalan ini secara permanen?')) {
+        deleteRoadEvent(key)
+            .then(() => alert('✅ Event jalan berhasil dihapus!'))
+            .catch(err => alert('❌ Gagal menghapus: ' + err.message));
+    }
+};
 
 // ============================================================
 // EXPORT GLOBAL

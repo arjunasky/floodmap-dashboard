@@ -76,5 +76,16 @@ function onSensorLogsOnce(callback) {
       callback(snap.val() || {});
   });
 }
+// ============================================================
+// FITUR HAPUS DATA
+// ============================================================
+
+function deleteSensorLog(key) {
+  return db.ref('sensor_logs/' + key).remove();
+}
+
+function deleteRoadEvent(key) {
+  return db.ref('road_events/' + key).remove();
+}
 
 console.log('✅ firebase-config.js loaded');
