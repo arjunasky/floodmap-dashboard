@@ -7,6 +7,10 @@ let map = null;
 let vehicleMarker = null;
 let floodLayerGroup = null;
 let roadEventLayerGroup = null;
+// 🔧 Tambahan layer group untuk filter
+let potholeLayerGroup = null; 
+let bumpLayerGroup = null;
+
 let vehicleLayerGroup = null;
 let segmentPolylines = {};
 let roadEventMarkers = [];
@@ -106,6 +110,10 @@ function initMap() {
 
     floodLayerGroup = L.layerGroup().addTo(map);
     roadEventLayerGroup = L.layerGroup().addTo(map);
+    // 🔧 Inisialisasi grup event terpisah
+    potholeLayerGroup = L.layerGroup().addTo(map);
+    bumpLayerGroup = L.layerGroup().addTo(map);
+    
     vehicleLayerGroup = L.layerGroup().addTo(map);
 
     vehicleMarker = L.marker(MAP_CONFIG.center, {
@@ -296,87 +304,9 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     segmentPolylines = {};
     totalDistance = 0;
 
-    // ---- RENDER POLYLINE (DINONAKTIFKAN KARENA FOKUS KE MARKER) ----
-    // Jika suatu saat ingin diaktifkan, hapus komentar (//) pada blok di bawah ini.
-    /*
-    if (floodData.length >= 2) {
-        const groupBySeg = {};
-        floodData.forEach(p => {
-            if (!p.segment_id) return;
-            if (!groupBySeg[p.segment_id]) groupBySeg[p.segment_id] = [];
-            groupBySeg[p.segment_id].push(p);
-        });
-
-        for (const [sid, points] of Object.entries(groupBySeg)) {
-            points.sort((a, b) => a.timestamp - b.timestamp);
-            const segments = buildPolylineSegments(points);
-
-            for (let idx = 0; idx < segments.length; idx++) {
-                const seg = segments[idx];
-                if (seg.length < 2) continue;
-
-                const avgDepth = seg.reduce((s, p) => s + (p.depth || 0), 0) / seg.length;
-                const category = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
-                const color = MAP_CONFIG.colors[category];
-                const widthMeters = ROAD_WIDTH_M[category];
-
-                let path = seg.map(p => [p.latitude, p.longitude]);
-
-                try {
-                    const matchResult = await matchToRoad(seg);
-                    if (matchResult.geometry && matchResult.geometry.length >= 2) {
-                        path = matchResult.geometry.map(g => [g.lat, g.lng]);
-                    } else {
-                        path = smoothPath(path);
-                    }
-                } catch (e) {
-                    path = smoothPath(path);
-                }
-
-                let segLength = 0;
-                for (let i = 1; i < path.length; i++) {
-                    segLength += haversine(path[i-1][0], path[i-1][1], path[i][0], path[i][1]);
-                }
-                totalDistance += segLength;
-
-                const centerLat = path[Math.floor(path.length / 2)][0];
-                const currentZoom = map.getZoom();
-                const weight = getWeightPixels(centerLat, currentZoom, widthMeters);
-
-                const polyline = L.polyline(path, {
-                    color: color,
-                    weight: weight,
-                    opacity: MAP_CONFIG.polylineOpacity,
-                    lineJoin: 'round',
-                    lineCap: 'round',
-                    smoothFactor: 0.5
-                });
-
-                polyline.bindPopup(`
-                    <div style="font-family:Inter; font-size:12px; min-width:180px;">
-                        <strong style="color:${color}; font-size:13px;">● ${category.toUpperCase()}</strong><br>
-                        <strong>Segmen:</strong> ${sid}<br>
-                        <strong>Panjang:</strong> ${segLength.toFixed(1)} m<br>
-                        <strong>Depth rata:</strong> ${avgDepth.toFixed(1)} cm<br>
-                        <strong>Titik GPS:</strong> ${seg.length}
-                    </div>
-                `);
-
-                floodLayerGroup.addLayer(polyline);
-                segmentPolylines[`${sid}_${idx}`] = {
-                    layer: polyline,
-                    widthMeters: widthMeters,
-                    lat: centerLat
-                };
-            }
-        }
-    }
-    */
-
-    // ---- 🔧 MARKER PER SEGMENT (1 segment = 1 titik geotag) ----
+    // ---- MARKER PER SEGMENT (1 segment = 1 titik geotag) ----
     const segmentMarkers = {};
     
-    // Gunakan for...of agar bisa await snapMarkerToRoad
     for (const p of floodData) {
         const sid = p.segment_id || 'unknown';
         if (segmentMarkers[sid]) continue;
@@ -387,12 +317,10 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         const cat = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
         const color = MAP_CONFIG.colors[cat];
 
-        // Ambil titik median (tengah dari genangan)
         const midIdx = Math.floor(segPoints.length / 2);
         const baseLat = segPoints[midIdx].latitude;
         const baseLng = segPoints[midIdx].longitude;
 
-        // Tarik ke jalan terdekat
         const snapped = await snapMarkerToRoad(baseLat, baseLng, sid);
         const finalLat = snapped.lat; 
         const finalLng = snapped.lng; 
@@ -403,7 +331,6 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
             lengthM += haversine(segPoints[i-1].latitude, segPoints[i-1].longitude, segPoints[i].latitude, segPoints[i].longitude);
         }
 
-        // 🔧 Desain Pin Custom
         const icon = L.divIcon({
             className: 'custom-flood-marker',
             html: `<div class="pin pin-${cat}"><div class="pin-value">${Math.round(avgDepth)}</div><div class="pin-pulse"></div></div>`,
@@ -454,7 +381,7 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
 }
 
 // ============================================================
-// 7. UPDATE WIDTH saat zoom (Untuk Polyline)
+// 7. UPDATE WIDTH saat zoom
 // ============================================================
 function updatePolylineWeights() {
     if (!map) return;
@@ -471,13 +398,18 @@ function updatePolylineWeights() {
 // ============================================================
 function initRoadEventLayer(mapInstance) {
     if (!mapInstance) return;
-    roadEventLayerGroup = L.layerGroup().addTo(mapInstance);
+    // Grup sudah diinisialisasi di initMap, ini untuk berjaga-jaga
+    if (!roadEventLayerGroup) roadEventLayerGroup = L.layerGroup().addTo(mapInstance);
+    if (!potholeLayerGroup) potholeLayerGroup = L.layerGroup().addTo(mapInstance);
+    if (!bumpLayerGroup) bumpLayerGroup = L.layerGroup().addTo(mapInstance);
 }
 
 async function renderRoadEvents(events) {
     if (!roadEventLayerGroup) return;
 
     roadEventLayerGroup.clearLayers();
+    potholeLayerGroup.clearLayers();
+    bumpLayerGroup.clearLayers();
     roadEventMarkers = [];
 
     if (!events || Object.keys(events).length === 0) return;
@@ -491,14 +423,12 @@ async function renderRoadEvents(events) {
         const lng = parseFloat(ev.longitude);
         if (isNaN(lat) || isNaN(lng)) continue;
 
-        // 🔧 Tarik event ke jalan terdekat
         const snapped = await snapMarkerToRoad(lat, lng, 'event_' + key);
         
         const isPothole = ev.event_type === 'pothole';
         const color = isPothole ? '#dc2626' : '#f59e0b';
         const label = isPothole ? 'Lubang' : 'Polisi Tidur';
 
-        // 🔧 Desain Ikon Vektor (Tabler Icons)
         const icon = L.divIcon({
             className: 'custom-event-marker',
             html: `<div class="event-pin event-${isPothole ? 'pothole' : 'bump'}"><i class="ti ti-${isPothole ? 'alert-octagon' : 'arrow-big-up-lines'}"></i></div>`,
@@ -521,7 +451,16 @@ async function renderRoadEvents(events) {
             </div>
         `);
 
+        // 🔧 Masukkan ke grup yang sesuai
+        if (isPothole) {
+            potholeLayerGroup.addLayer(marker);
+        } else {
+            bumpLayerGroup.addLayer(marker);
+        }
+        
+        // Tetap tambahkan ke parent grup untuk fungsi Fit Bounds
         roadEventLayerGroup.addLayer(marker);
+        
         roadEventMarkers.push({ marker, data: ev, type: ev.event_type });
     }
 }
@@ -553,7 +492,11 @@ function updateMapStats(points, events, offRoad) {
 function setupMapFilters() {
     const cbFlood = document.getElementById('filterFlood');
     const cbVehicle = document.getElementById('filterVehicle');
+    // 🔧 Ambil element checkbox untuk event
+    const cbPothole = document.getElementById('filterPothole');
+    const cbBump = document.getElementById('filterBump');
 
+    // Filter Genangan
     if (cbFlood) {
         cbFlood.addEventListener('change', () => {
             if (cbFlood.checked) {
@@ -564,6 +507,7 @@ function setupMapFilters() {
         });
     }
 
+    // Filter Kendaraan
     if (cbVehicle) {
         cbVehicle.addEventListener('change', () => {
             if (cbVehicle.checked) {
@@ -578,6 +522,29 @@ function setupMapFilters() {
         });
     }
 
+    // 🔧 Filter Lubang
+    if (cbPothole) {
+        cbPothole.addEventListener('change', () => {
+            if (cbPothole.checked) {
+                if (potholeLayerGroup) potholeLayerGroup.addTo(map);
+            } else {
+                if (potholeLayerGroup) map.removeLayer(potholeLayerGroup);
+            }
+        });
+    }
+
+    // 🔧 Filter Polisi Tidur
+    if (cbBump) {
+        cbBump.addEventListener('change', () => {
+            if (cbBump.checked) {
+                if (bumpLayerGroup) bumpLayerGroup.addTo(map);
+            } else {
+                if (bumpLayerGroup) map.removeLayer(bumpLayerGroup);
+            }
+        });
+    }
+
+    // Fit Bounds
     const btnFit = document.getElementById('btnFitBounds');
     if (btnFit) {
         btnFit.addEventListener('click', () => {
@@ -591,6 +558,7 @@ function setupMapFilters() {
         });
     }
 
+    // Reset View
     const btnReset = document.getElementById('btnClearView');
     if (btnReset) {
         btnReset.addEventListener('click', () => {
