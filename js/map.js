@@ -7,8 +7,8 @@ let map = null;
 let vehicleMarker = null;
 let floodLayerGroup = null;
 let roadEventLayerGroup = null;
-let potholeLayerGroup = null; // 🔧 Tambahan untuk filter
-let bumpLayerGroup = null;    // 🔧 Tambahan untuk filter
+let potholeLayerGroup = null; 
+let bumpLayerGroup = null;    
 let vehicleLayerGroup = null;
 let segmentPolylines = {};
 let roadEventMarkers = [];
@@ -16,7 +16,7 @@ let totalDistance = 0;
 let isFirstLoad = true;
 
 // 🔧 Variabel untuk Counter & Jejak Motor
-window.globalVehicleTracks = []; // Menyimpan jejak GPS motor
+window.globalVehicleTracks = []; 
 let globalFloodCount = 0;
 let globalEventCount = 0;
 let globalOffRoadCount = 0;
@@ -113,8 +113,8 @@ function initMap() {
 
     floodLayerGroup = L.layerGroup().addTo(map);
     roadEventLayerGroup = L.layerGroup().addTo(map);
-    potholeLayerGroup = L.layerGroup().addTo(map); // 🔧
-    bumpLayerGroup = L.layerGroup().addTo(map);    // 🔧
+    potholeLayerGroup = L.layerGroup().addTo(map);
+    bumpLayerGroup = L.layerGroup().addTo(map);
     vehicleLayerGroup = L.layerGroup().addTo(map);
 
     vehicleMarker = L.marker(MAP_CONFIG.center, {
@@ -207,7 +207,6 @@ async function matchToRoad(points) {
             `${p.longitude.toFixed(6)},${p.latitude.toFixed(6)}`
         ).join(';');
 
-        // 🔧 Perbaikan: radiuses harus dinamis
         const radiuses = new Array(batch.length).fill(50).join(';');
 
         const url = `https://router.project-osrm.org/match/v1/driving/${coords}` +
@@ -295,19 +294,16 @@ function buildPolylineSegments(points) {
 // ============================================================
 // 6. REDRAW MAP (Genangan & Simpan Jejak Motor)
 // ============================================================
-async function redrawMapFromData(allData, floodData, offRoadData) {
+async function redrawMapFromData(allData, segmentsData, offRoadData) {
     if (!map || !floodLayerGroup) return;
 
-    if (!floodData) floodData = [];
+    if (!segmentsData) segmentsData = [];
     if (!offRoadData) offRoadData = [];
 
     // 🔧 Simpan jejak motor
     if (allData && allData.length > 0) {
         window.globalVehicleTracks = allData.filter(p => p.source === 'gps').sort((a, b) => a.timestamp - b.timestamp);
     }
-
-    const DRY = (typeof DRY_THRESHOLD !== 'undefined') ? DRY_THRESHOLD : 3.0;
-    floodData = floodData.filter(p => (p.depth || 0) >= DRY);
 
     floodLayerGroup.clearLayers();
     segmentPolylines = {};
@@ -316,27 +312,24 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
     // ---- MARKER PER SEGMENT (PIN TETESAN AIR) ----
     const segmentMarkers = {};
     
-    for (const p of floodData) {
-        const sid = p.segment_id || 'unknown';
-        if (segmentMarkers[sid]) continue;
-
-        const segPoints = floodData.filter(x => x.segment_id === sid);
-        const avgDepth = segPoints.reduce((s, x) => s + (x.depth || 0), 0) / segPoints.length;
-        const maxDepth = Math.max(...segPoints.map(x => x.depth || 0));
-        const cat = avgDepth < 10 ? 'aman' : avgDepth < 20 ? 'siaga' : 'bahaya';
+    // 🔧 LOOPING LANGSUNG DARI DATA CLUSTER YANG SUDAH JADI
+    for (const seg of segmentsData) {
+        const sid = seg.segment_id;
+        const avgDepth = seg.avgDepth;
+        const maxDepth = seg.maxDepth;
+        const cat = seg.category; // Kategori sudah dihitung di app.js menggunakan avgDepth
         const color = MAP_CONFIG.colors[cat];
 
-        const midIdx = Math.floor(segPoints.length / 2);
-        const baseLat = segPoints[midIdx].latitude;
-        const baseLng = segPoints[midIdx].longitude;
+        const baseLat = seg.centerLat;
+        const baseLng = seg.centerLng;
 
+        // Tarik marker ke jalan
         const snapped = await snapMarkerToRoad(baseLat, baseLng, sid);
-        const finalLat = snapped.lat; const finalLng = snapped.lng; const gpsError = snapped.distance;
+        const finalLat = snapped.lat; 
+        const finalLng = snapped.lng; 
+        const gpsError = snapped.distance;
 
-        let lengthM = 0;
-        for (let i = 1; i < segPoints.length; i++) {
-            lengthM += haversine(segPoints[i-1].latitude, segPoints[i-1].longitude, segPoints[i].latitude, segPoints[i].longitude);
-        }
+        let lengthM = seg.lengthM || 0;
 
         const icon = L.divIcon({
             className: 'custom-flood-marker',
@@ -379,8 +372,8 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         }
     }
 
-      // 🔧 Hitung jumlah Pin yang benar-benar dirender di peta, bukan data mentah
-      globalFloodCount = Object.keys(segmentMarkers).length; 
+    // 🔧 Hitung jumlah Pin yang tampil, bukan data mentah
+    globalFloodCount = segmentsData.length; 
     globalOffRoadCount = offRoadData.length;
     updateMapStats();
 }
@@ -476,7 +469,6 @@ async function renderRoadEvents(events) {
                 }
             }
 
-            // 🔧 Trik CSS: Kotak transparan agar putaran tetap di tengah jalan
             icon = L.divIcon({
                 className: 'custom-bump-marker',
                 html: `

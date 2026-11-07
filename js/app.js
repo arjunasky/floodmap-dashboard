@@ -120,8 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateOffRoadStats(currentOffRoadData);
         updateFloodSegmentsTable(currentFloodSegments);
 
-        redrawMapFromData(currentVehicleData, currentFloodData, currentOffRoadData)
-            .catch(err => console.error('Map error:', err));
+        redrawMapFromData(currentVehicleData, currentFloodSegments, currentOffRoadData)
+        .catch(err => console.error('Map error:', err));
 
         if (currentVehicleData.length > 0 && typeof prefetchStreetNames === 'function') {
             prefetchStreetNames(currentVehicleData).then(() => {
