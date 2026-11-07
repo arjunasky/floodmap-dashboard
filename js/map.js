@@ -331,15 +331,28 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
             lengthM += haversine(segPoints[i-1].latitude, segPoints[i-1].longitude, segPoints[i].latitude, segPoints[i].longitude);
         }
 
-        const icon = L.divIcon({
-            className: 'custom-flood-marker',
-            html: `<div class="pin pin-${cat}"><div class="pin-value">${Math.round(avgDepth)}</div><div class="pin-pulse"></div></div>`,
-            iconSize: [40, 50], 
-            iconAnchor: [20, 50], 
-            popupAnchor: [0, -50]
-        });
-
-        const marker = L.marker([finalLat, finalLng], { icon });
+                // 🔧 DESAIN IKON: Lubang (Bulat) vs Polisi Tidur (Melintang)
+                let icon;
+                if (isPothole) {
+                    icon = L.divIcon({
+                        className: 'custom-event-marker',
+                        html: `<div class="event-pin event-pothole"><i class="ti ti-alert-octagon"></i></div>`,
+                        iconSize: [36, 36], 
+                        iconAnchor: [18, 18], 
+                        popupAnchor: [0, -18]
+                    });
+                } else {
+                    // Polisi Tidur: Bentuk bar melintang
+                    icon = L.divIcon({
+                        className: 'custom-bump-marker',
+                        html: `<div class="event-bump-bar"></div>`,
+                        iconSize: [60, 16], 
+                        iconAnchor: [30, 8], // Titik tengah bar ada di koordinat
+                        popupAnchor: [0, -8]
+                    });
+                }
+        
+                const marker = L.marker([snapped.lat, snapped.lng], { icon });
 
         marker.bindPopup(`
             <div style="font-family:Inter; font-size:12px; min-width:240px;">
