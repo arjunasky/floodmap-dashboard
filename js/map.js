@@ -379,7 +379,8 @@ async function redrawMapFromData(allData, floodData, offRoadData) {
         }
     }
 
-    globalFloodCount = floodData.length;
+      // 🔧 Hitung jumlah Pin yang benar-benar dirender di peta, bukan data mentah
+      globalFloodCount = Object.keys(segmentMarkers).length; 
     globalOffRoadCount = offRoadData.length;
     updateMapStats();
 }
