@@ -1841,3 +1841,32 @@ table tr:last-child td {
     40% { transform: translateY(-6px); }
     60% { transform: translateY(-3px); }
 }
+/* ============================================================ */
+/* 🔧 DESAIN MARKER POLISI TIDUR (BENTUK MELINTANG) */
+/* ============================================================ */
+
+.custom-bump-marker {
+    background: none;
+    border: none;
+}
+
+.event-bump-bar {
+    width: 60px;
+    height: 16px;
+    background: repeating-linear-gradient(
+        -45deg,
+        #f59e0b,
+        #f59e0b 10px,
+        #1e293b 10px,
+        #1e293b 20px
+    );
+    border: 2px solid #fff;
+    border-radius: 4px;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+    transition: transform 0.2s ease;
+}
+
+.event-bump-bar:hover {
+    transform: scale(1.1);
+    box-shadow: 0 5px 12px rgba(0,0,0,0.5);
+}
