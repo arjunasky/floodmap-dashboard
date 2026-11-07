@@ -158,6 +158,141 @@ function haversine(lat1, lng1, lat2, lng2) {
 }
 
 // ============================================================
+// 3. SMOOTH PATH
+// ============================================================
+function smoothPath(points) {
+    if (points.length < 3) return points;
+    const out = [points[0]];
+    for (let i = 1; i < points.length - 1; i++) {
+        const p = points[i - 1];
+        const c = points[i];
+        const n = points[i + 1];
+        out.push([
+            (p[0] + c[0] * 2 + n[0]) / 4,
+            (p[1] + c[1] * 2 + n[1]) / 4
+        ]);
+    }
+    out.push(points[points.length - 1]);
+    return out;
+}
+
+// ============================================================
+// 4. ROAD MATCHING — OSRM
+// ============================================================
+const roadMatchCache = {};
+
+async function matchToRoad(points) {
+    if (points.length === 0) return { matched: [], geometry: [] };
+
+    const batches = [];
+    for (let i = 0; i < points.length; i += 90) {
+        batches.push(points.slice(i, i + 90));
+    }
+
+    const allMatched = [];
+    const allGeometry = [];
+
+    for (const batch of batches) {
+        const cacheKey = batch.map(p =>
+            `${p.latitude.toFixed(4)},${p.longitude.toFixed(4)}`
+        ).join('|');
+
+        if (roadMatchCache[cacheKey]) {
+            allMatched.push(...roadMatchCache[cacheKey].matched);
+            allGeometry.push(...roadMatchCache[cacheKey].geometry);
+            continue;
+        }
+
+        const coords = batch.map(p =>
+            `${p.longitude.toFixed(6)},${p.latitude.toFixed(6)}`
+        ).join(';');
+
+        // 🔧 Perbaikan: radiuses harus dinamis
+        const radiuses = new Array(batch.length).fill(50).join(';');
+
+        const url = `https://router.project-osrm.org/match/v1/driving/${coords}` +
+                    `?geometries=geojson&overview=full&gaps=ignore&tidy=true&radiuses=${radiuses}`;
+
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`OSRM ${res.status}`);
+            const data = await res.json();
+
+            const tracepoints = data.tracepoints || [];
+            const matched = [];
+
+            batch.forEach((p, idx) => {
+                const tp = tracepoints[idx];
+                const snapDist = tp ? tp.distance : 999;
+                matched.push({
+                    ...p,
+                    snapDistance: snapDist,
+                    matched: snapDist <= ROAD_CONFIG.MAX_SNAP_DISTANCE
+                });
+            });
+
+            const geometry = [];
+            if (data.matchings && data.matchings.length > 0) {
+                data.matchings.forEach(m => {
+                    if (m.geometry && m.geometry.coordinates) {
+                        m.geometry.coordinates.forEach(c => {
+                            geometry.push({ lat: c[1], lng: c[0] });
+                        });
+                    }
+                });
+            }
+
+            roadMatchCache[cacheKey] = { matched, geometry };
+            allMatched.push(...matched);
+            allGeometry.push(...geometry);
+
+        } catch (e) {
+            console.warn('⚠️ OSRM error:', e.message);
+            batch.forEach(p => allMatched.push({ ...p, matched: true }));
+        }
+    }
+
+    return { matched: allMatched, geometry: allGeometry };
+}
+
+// ============================================================
+// 5. BUILD SEGMENTS
+// ============================================================
+function buildPolylineSegments(points) {
+    if (points.length < 2) return [];
+
+    const DRY = (typeof DRY_THRESHOLD !== 'undefined') ? DRY_THRESHOLD : 3.0;
+    points = points.filter(p => (p.depth || 0) >= DRY);
+
+    if (points.length < 2) return [];
+
+    const segments = [];
+    let current = [points[0]];
+
+    for (let i = 1; i < points.length; i++) {
+        const dist = haversine(
+            points[i-1].latitude, points[i-1].longitude,
+            points[i].latitude, points[i].longitude
+        );
+
+        if (dist > ROAD_CONFIG.MAX_GAP_BREAK) {
+            if (current.length >= ROAD_CONFIG.MIN_POINTS_SEGMENT) {
+                segments.push(current);
+            }
+            current = [points[i]];
+        } else {
+            current.push(points[i]);
+        }
+    }
+
+    if (current.length >= ROAD_CONFIG.MIN_POINTS_SEGMENT) {
+        segments.push(current);
+    }
+
+    return segments;
+}
+
+// ============================================================
 // 6. REDRAW MAP (Genangan & Simpan Jejak Motor)
 // ============================================================
 async function redrawMapFromData(allData, floodData, offRoadData) {
@@ -298,10 +433,10 @@ async function renderRoadEvents(events) {
         const lng = parseFloat(ev.longitude);
         if (isNaN(lat) || isNaN(lng)) continue;
 
-        // 🔧 1. ANTI-MULTIPLY (Jarak < 15 meter diabaikan)
+        // 🔧 1. ANTI-MULTIPLY (Jarak < 20 meter diabaikan)
         let isDuplicate = false;
         for (const placed of placedEvents) {
-            if (haversine(lat, lng, placed.lat, placed.lng) < 15.0) {
+            if (haversine(lat, lng, placed.lat, placed.lng) < 20.0) {
                 isDuplicate = true; 
                 break; 
             }
@@ -322,18 +457,16 @@ async function renderRoadEvents(events) {
                 iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -18]
             });
         } else {
-            // 🔧 2. CARI SUDUT DARI JEJAK MOTOR (BUKAN OSRM)
+            // 🔧 2. CARI SUDUT DARI JEJAK MOTOR
             let angle = 0;
             if (tracks.length > 1) {
                 let minDist = Infinity;
                 let closestIdx = 0;
-                // Cari posisi motor yang paling dekat dengan polisi tidur
                 for (let j = 0; j < tracks.length; j++) {
                     const d = haversine(lat, lng, tracks[j].latitude, tracks[j].longitude);
                     if (d < minDist) { minDist = d; closestIdx = j; }
                 }
                 
-                // Ambil 4 titik sebelum dan 4 titik sesudah untuk melihat arah jalan
                 const p1 = tracks[Math.max(0, closestIdx - 4)];
                 const p2 = tracks[Math.min(tracks.length - 1, closestIdx + 4)];
                 
